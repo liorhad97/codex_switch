@@ -1,0 +1,23 @@
+{
+  "name": "codex-switch",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "web:build": "vite build",
+    "backend": "python3 -m codex_profile_switcher.server --static-root ./web/dist",
+    "electron": "npm run web:build && electron electron/main.cjs",
+    "test:web-build": "vite build"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^37.2.0",
+    "playwright": "^1.59.1",
+    "vite": "^7.0.0"
+  }
+}

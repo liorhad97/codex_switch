@@ -1,0 +1,371 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b1115;
+  --panel: #11181f;
+  --panel-strong: #161f27;
+  --panel-selected: #1b2630;
+  --border: #24313d;
+  --text: #eef4f8;
+  --text-muted: #9cafbd;
+  --text-soft: #7d8f9d;
+  --accent: #6fd0ae;
+  --accent-strong: #4db690;
+  --danger: #ff8f96;
+  --font-ui: "Avenir Next", "SF Pro Display", "Segoe UI", sans-serif;
+  --font-mono: "Menlo", "SFMono-Regular", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+code {
+  font-family: var(--font-mono);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-frame {
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.relay-sidebar,
+.relay-main-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+}
+
+.relay-sidebar {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.relay-sidebar-header {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.relay-sidebar-body {
+  flex: 1;
+  overflow: auto;
+  padding: 14px;
+}
+
+.relay-page-title,
+.relay-main-title {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.relay-page-title {
+  font-size: 1.4rem;
+}
+
+.relay-main-title {
+  font-size: 2rem;
+}
+
+.relay-page-copy,
+.relay-main-copy,
+.relay-account-copy,
+.relay-empty-copy {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.relay-header-actions,
+.relay-main-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.relay-header-button,
+.relay-account-action {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-strong);
+  color: var(--text);
+  padding: 11px 15px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.relay-header-button:hover,
+.relay-account-action:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: #1a242e;
+}
+
+.relay-header-button-primary,
+.relay-account-action-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #082018;
+  font-weight: 700;
+}
+
+.relay-header-button-primary:hover,
+.relay-account-action-primary:hover {
+  background: var(--accent-strong);
+}
+
+.relay-header-button:disabled,
+.relay-account-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.relay-account-list {
+  display: grid;
+  gap: 10px;
+}
+
+.relay-account-card {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel-strong);
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.relay-account-card.is-selected {
+  background: var(--panel-selected);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.relay-account-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.relay-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: #0d1419;
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  color: var(--text);
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.relay-account-card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.relay-account-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.relay-account-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.98rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relay-account-footer {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.relay-status-text {
+  color: var(--text-soft);
+  font-size: 0.86rem;
+}
+
+.relay-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: rgba(111, 208, 174, 0.12);
+  color: var(--accent);
+  padding: 4px 9px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.relay-pill-primary {
+  background: rgba(111, 208, 174, 0.18);
+}
+
+.relay-account-error {
+  color: var(--danger);
+  font-size: 0.86rem;
+}
+
+.relay-main-panel {
+  padding: 24px;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+.relay-main-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.relay-main-label,
+.relay-usage-stat-label {
+  margin: 0 0 6px;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.relay-feedback {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #141d25;
+  padding: 12px 14px;
+  color: var(--text-muted);
+}
+
+.relay-feedback-warn {
+  color: var(--danger);
+}
+
+.relay-pending-panel {
+  gap: 12px;
+}
+
+.relay-pending-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.relay-pending-code {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.relay-panel-close {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0d1419;
+  color: var(--text-muted);
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.relay-panel-close:hover {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--text);
+}
+
+.relay-panel-close:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.relay-link-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #0d1419;
+  color: var(--text);
+  padding: 12px 14px;
+}
+
+.relay-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.relay-usage-stat {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel-strong);
+  padding: 18px;
+}
+
+.relay-usage-stat-full {
+  max-width: 680px;
+}
+
+.relay-usage-stat-value {
+  margin: 0;
+  color: var(--text);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.relay-usage-stat-reset {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+@media (max-width: 920px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .relay-usage-grid {
+    grid-template-columns: 1fr;
+  }
+}

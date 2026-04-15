@@ -1,0 +1,76 @@
+- generic [ref=e4]:
+  - complementary [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - heading "Codex Switch" [level=1] [ref=e8]
+        - paragraph [ref=e9]: Pick an account, see remaining usage, and open it.
+      - generic [ref=e10]:
+        - button "Add Account" [ref=e11] [cursor=pointer]
+        - button "Refresh" [ref=e12] [cursor=pointer]
+    - generic [ref=e18]:
+      - button "L liorwick97@gmail.com 5h 91% • Weekly 0% Connected" [ref=e19] [cursor=pointer]:
+        - generic [ref=e20]:
+          - generic [ref=e21]: L
+          - generic [ref=e22]:
+            - heading "liorwick97@gmail.com" [level=3] [ref=e24]
+            - paragraph [ref=e25]: 5h 91% • Weekly 0%
+        - generic [ref=e27]: Connected
+      - button "A alexposp98@gmail.com 5h 100% • Weekly 40% Connected" [ref=e28] [cursor=pointer]:
+        - generic [ref=e29]:
+          - generic [ref=e30]: A
+          - generic [ref=e31]:
+            - heading "alexposp98@gmail.com" [level=3] [ref=e33]
+            - paragraph [ref=e34]: 5h 100% • Weekly 40%
+        - generic [ref=e36]: Connected
+      - button "L liorpictures971@gmail.com 5h 100% • Weekly 38% Connected" [ref=e37] [cursor=pointer]:
+        - generic [ref=e38]:
+          - generic [ref=e39]: L
+          - generic [ref=e40]:
+            - heading "liorpictures971@gmail.com" [level=3] [ref=e42]
+            - paragraph [ref=e43]: 5h 100% • Weekly 38%
+        - generic [ref=e45]: Connected
+      - button "J jonibern39@gmail.com 5h 100% • Weekly 52% Connected" [ref=e46] [cursor=pointer]:
+        - generic [ref=e47]:
+          - generic [ref=e48]: J
+          - generic [ref=e49]:
+            - heading "jonibern39@gmail.com" [level=3] [ref=e51]
+            - paragraph [ref=e52]: 5h 100% • Weekly 52%
+        - generic [ref=e54]: Connected
+      - button "P paperkol94@gmail.com 5h 100% • Weekly 41% Connected" [ref=e55] [cursor=pointer]:
+        - generic [ref=e56]:
+          - generic [ref=e57]: P
+          - generic [ref=e58]:
+            - heading "paperkol94@gmail.com" [level=3] [ref=e60]
+            - paragraph [ref=e61]: 5h 100% • Weekly 41%
+        - generic [ref=e63]: Connected
+      - button "L losyl5106@gmail.com 5h 0% • Weekly 84% Connected" [ref=e64] [cursor=pointer]:
+        - generic [ref=e65]:
+          - generic [ref=e66]: L
+          - generic [ref=e67]:
+            - heading "losyl5106@gmail.com" [level=3] [ref=e69]
+            - paragraph [ref=e70]: 5h 0% • Weekly 84%
+        - generic [ref=e72]: Connected
+      - button "L lodrigopani@gmail.com 5h 51% • Weekly 92% Connected" [ref=e73] [cursor=pointer]:
+        - generic [ref=e74]:
+          - generic [ref=e75]: L
+          - generic [ref=e76]:
+            - heading "lodrigopani@gmail.com" [level=3] [ref=e78]
+            - paragraph [ref=e79]: 5h 51% • Weekly 92%
+        - generic [ref=e81]: Connected
+  - main [ref=e15]:
+    - generic [ref=e83]:
+      - paragraph [ref=e84]: Connected
+      - heading "paperkol94@gmail.com" [level=2] [ref=e85]
+      - paragraph [ref=e86]: Current remaining usage for this account.
+    - generic [ref=e87]:
+      - generic [ref=e88]:
+        - paragraph [ref=e89]: 5 hour window
+        - paragraph [ref=e90]: 100%
+        - paragraph [ref=e91]: Resets 7:03 PM
+      - generic [ref=e92]:
+        - paragraph [ref=e93]: Weekly window
+        - paragraph [ref=e94]: 41%
+        - paragraph [ref=e95]: Resets Apr 16
+    - generic [ref=e96]:
+      - button "Set Primary" [ref=e97] [cursor=pointer]
+      - button "Open in Codex" [ref=e98] [cursor=pointer]

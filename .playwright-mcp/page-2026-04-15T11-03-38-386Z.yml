@@ -1,0 +1,12 @@
+- generic [ref=e4]:
+  - complementary [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - heading "Codex Switch" [level=1] [ref=e8]
+        - paragraph [ref=e9]: Pick an account, see remaining usage, and open it.
+      - generic [ref=e10]:
+        - button "Add Account" [ref=e11] [cursor=pointer]
+        - button "Refresh" [ref=e12] [cursor=pointer]
+    - paragraph [ref=e14]: Loading accounts...
+  - main [ref=e15]:
+    - paragraph [ref=e17]: Select an account to see usage.

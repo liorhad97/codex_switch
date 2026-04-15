@@ -1,0 +1,8 @@
+[   60078ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8766/api/state?refresh_usage=1:0
+[  120082ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8766/api/state?refresh_usage=1:0
+[  180082ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8766/api/state?refresh_usage=1:0
+[  240081ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8766/api/state?refresh_usage=1:0
+[  300084ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8766/api/state?refresh_usage=1:0
+[  360082ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8766/api/state?refresh_usage=1:0
+[  420081ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8766/api/state?refresh_usage=1:0
+[  480079ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8766/api/state?refresh_usage=1:0
