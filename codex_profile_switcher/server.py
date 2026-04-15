@@ -284,7 +284,6 @@ class SwitcherServer(ThreadingHTTPServer):
             "prepared_profiles_root": str(self.store.paths.prepared_profiles_root),
             "main_codex_home": str(self.store.paths.main_codex_home),
             "codex_app_path": str(config.codex_app_path),
-            "source_flutty_data_root": str(self.store.paths.source_flutty_data_root),
         }
 
     def _load_account_live_state(

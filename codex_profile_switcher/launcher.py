@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 DEFAULT_CODEX_APP_PATH = Path("/Applications/Codex.app")
 DEFAULT_CODEX_USER_DATA_DIR = Path.home() / "Library" / "Application Support" / "Codex"
+CODEX_TERMINATION_TIMEOUT_SECONDS = 5.0
+CODEX_TERMINATION_POLL_INTERVAL_SECONDS = 0.1
 
 
 def _is_same_or_nested(path: Path, other: Path) -> bool:
@@ -35,18 +39,86 @@ def codex_launch_env(
     return dict(os.environ)
 
 
-def is_default_codex_running() -> bool:
+def _read_process_listing() -> list[tuple[int, str]]:
     try:
-        output = subprocess.check_output(["ps", "-Ao", "pid,command"], text=True)
+        output = subprocess.check_output(["ps", "-Ao", "pid=,command="], text=True)
     except (OSError, subprocess.SubprocessError):
-        return False
+        return []
 
+    processes: list[tuple[int, str]] = []
+    for line in output.splitlines():
+        parts = line.strip().split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        pid_text, command = parts
+        try:
+            pid = int(pid_text)
+        except ValueError:
+            continue
+        processes.append((pid, command))
+    return processes
+
+
+def _matches_codex_executable(command: str, executable: str) -> bool:
+    return command == executable or command.startswith(f"{executable} ")
+
+
+def running_codex_pids(codex_app_path: Path) -> list[int]:
+    executable = str(codex_executable_path(codex_app_path))
+    return [pid for pid, command in _read_process_listing() if _matches_codex_executable(command, executable)]
+
+
+def is_default_codex_running() -> bool:
     default_dir = str(DEFAULT_CODEX_USER_DATA_DIR.expanduser().resolve())
     executable = str(codex_executable_path(DEFAULT_CODEX_APP_PATH))
-    for line in output.splitlines():
-        if executable in line and (f"--user-data-dir={default_dir}" in line or line.strip().endswith(executable)):
+    for _, command in _read_process_listing():
+        if _matches_codex_executable(command, executable) and (
+            f"--user-data-dir={default_dir}" in command or command == executable
+        ):
             return True
     return False
+
+
+def _wait_for_codex_exit(codex_app_path: Path, pids: set[int], timeout_seconds: float) -> set[int]:
+    deadline = time.monotonic() + max(timeout_seconds, 0.0)
+    remaining = set(pids)
+    while remaining:
+        remaining &= set(running_codex_pids(codex_app_path))
+        if not remaining:
+            return set()
+        if time.monotonic() >= deadline:
+            return remaining
+        time.sleep(CODEX_TERMINATION_POLL_INTERVAL_SECONDS)
+    return set()
+
+
+def terminate_running_codex(
+    codex_app_path: Path,
+    *,
+    timeout_seconds: float = CODEX_TERMINATION_TIMEOUT_SECONDS,
+) -> bool:
+    pids = set(running_codex_pids(codex_app_path))
+    if not pids:
+        return False
+
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            continue
+
+    stubborn_pids = _wait_for_codex_exit(codex_app_path, pids, timeout_seconds)
+    if not stubborn_pids:
+        return True
+
+    for pid in stubborn_pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            continue
+
+    _wait_for_codex_exit(codex_app_path, stubborn_pids, CODEX_TERMINATION_TIMEOUT_SECONDS)
+    return True
 
 
 def build_codex_launch_command(
@@ -65,6 +137,7 @@ def launch_codex(
     account_home_dir: Path | None = None,
 ) -> None:
     del user_data_dir, account_home_dir
+    terminate_running_codex(codex_app_path)
     executable = codex_executable_path(codex_app_path)
     subprocess.Popen(
         [str(executable)],

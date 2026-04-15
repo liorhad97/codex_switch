@@ -19,12 +19,14 @@
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
-  min-height: 100vh;
+  height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
+  overflow: hidden;
 }
 
 button,
@@ -37,11 +39,11 @@ code {
 }
 
 #root {
-  min-height: 100vh;
+  height: 100%;
 }
 
 .app-frame {
-  min-height: 100vh;
+  height: 100vh;
   position: relative;
   overflow: hidden;
 }
@@ -50,7 +52,7 @@ code {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
   gap: 16px;
-  min-height: 100vh;
+  height: 100%;
   padding: 16px;
 }
 
@@ -249,6 +251,7 @@ code {
   display: grid;
   align-content: start;
   gap: 18px;
+  overflow: hidden;
 }
 
 .relay-main-header {

@@ -112,7 +112,7 @@ class AccountSwitcherApp:
         ).pack(anchor="w", pady=(4, 6))
         tk.Label(
             header,
-            text="View flutty_orc accounts, choose a safe primary profile, and launch Codex against isolated prepared user-data directories.",
+            text="View managed Codex accounts, choose a safe primary profile, and launch Codex against isolated prepared user-data directories.",
             fg=TEXT_MUTED,
             bg=PANEL,
             font=self.small_font,
@@ -163,7 +163,7 @@ class AccountSwitcherApp:
             empty.pack(fill="x", padx=6, pady=6)
             tk.Label(
                 empty,
-                text="No accounts were found in flutty_orc_data.",
+                text="No managed accounts were found under llm_accounts_profiles.",
                 fg=TEXT_MUTED,
                 bg=CARD,
                 font=self.body_font,
@@ -251,7 +251,7 @@ class AccountSwitcherApp:
 
         actions = tk.Frame(title_wrap, bg=PANEL_ALT)
         actions.pack(side="right")
-        self._make_button(actions, "Reveal flutty home", lambda: reveal_in_finder(account.home_dir)).pack(
+        self._make_button(actions, "Reveal account home", lambda: reveal_in_finder(account.home_dir)).pack(
             side="left", padx=(0, 8)
         )
         if account.mapped_codex_profile:
@@ -290,14 +290,19 @@ class AccountSwitcherApp:
         tk.Label(parent, text="Profile details", fg=TEXT, bg=CARD, font=self.heading_font).pack(
             anchor="w", padx=18, pady=(18, 12)
         )
+        source_label = {
+            "managed_profile": "managed profile directory",
+            "local_created": "switcher local profile",
+            "local_oauth": "switcher local profile",
+        }.get(account.source, account.source.replace("_", " "))
         self._detail_row(parent, "Account ID", account.id)
-        self._detail_row(parent, "Flutty home", str(account.home_dir))
+        self._detail_row(parent, "Account home", str(account.home_dir))
         self._detail_row(
             parent,
             "Prepared Codex profile",
             str(account.mapped_codex_profile) if account.mapped_codex_profile else "Not mapped yet",
         )
-        self._detail_row(parent, "Source", "flutty_orc database" if account.source == "db" else "folder scan")
+        self._detail_row(parent, "Source", source_label)
         self._detail_row(parent, "Created", format_timestamp(account.created_at))
         self._detail_row(parent, "Updated", format_timestamp(account.updated_at))
         self._detail_row(parent, "Default Codex profile", str(DEFAULT_CODEX_USER_DATA_DIR))

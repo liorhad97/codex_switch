@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -10,15 +9,11 @@ from typing import Any
 
 from .launcher import DEFAULT_CODEX_APP_PATH
 from .models import AccountRecord, SwitcherConfig
-from .profile_home import codex_home_path
+from .profile_home import codex_home_path, sync_profile_home
 
 
 @dataclass(frozen=True, slots=True)
 class AppPaths:
-    source_flutty_data_root: Path
-    source_relay_db_path: Path
-    source_profiles_dir: Path
-    source_accounts_dir: Path
     data_root: Path
     config_path: Path
     accounts_snapshot_path: Path
@@ -28,17 +23,13 @@ class AppPaths:
     @classmethod
     def default(cls) -> "AppPaths":
         home = Path.home().expanduser().resolve()
-        source_root = home / "flutty_orc_data"
         data_root = home / "codex_switch_data"
+        managed_profiles_root = home / "llm_accounts_profiles" / "codex" / "profiles"
         return cls(
-            source_flutty_data_root=source_root,
-            source_relay_db_path=source_root / "codex_relay.db",
-            source_profiles_dir=source_root / "profiles",
-            source_accounts_dir=source_root / "accounts",
             data_root=data_root,
             config_path=data_root / "config.json",
             accounts_snapshot_path=data_root / "accounts.json",
-            prepared_profiles_root=data_root / "prepared_profiles",
+            prepared_profiles_root=managed_profiles_root,
             main_codex_home=home / ".codex",
         )
 
@@ -60,9 +51,13 @@ class ProfileStore:
             )
 
         launch_profiles: dict[str, Path] = {}
+        config_needs_save = False
         for account_id, raw_path in (payload.get("launch_profiles") or {}).items():
             if isinstance(account_id, str) and isinstance(raw_path, str) and raw_path.strip():
-                launch_profiles[account_id] = self._normalize_launch_profile_path(Path(raw_path))
+                normalized_path = self._normalize_launch_profile_path(Path(raw_path), account_id=account_id)
+                launch_profiles[account_id] = normalized_path
+                if normalized_path != Path(raw_path).expanduser().resolve():
+                    config_needs_save = True
 
         raw_app_path = payload.get("codex_app_path")
         codex_app_path = (
@@ -72,12 +67,15 @@ class ProfileStore:
         )
         primary_account_id = payload.get("primary_account_id")
         last_selected_account_id = payload.get("last_selected_account_id")
-        return SwitcherConfig(
+        config = SwitcherConfig(
             primary_account_id=primary_account_id if isinstance(primary_account_id, str) else None,
             last_selected_account_id=last_selected_account_id if isinstance(last_selected_account_id, str) else None,
             codex_app_path=codex_app_path,
             launch_profiles=launch_profiles,
         )
+        if config_needs_save:
+            self.save_config(config)
+        return config
 
     def save_config(self, config: SwitcherConfig) -> None:
         payload = {
@@ -92,15 +90,10 @@ class ProfileStore:
         self._write_json(self.paths.config_path, payload)
 
     def import_accounts(self) -> list[AccountRecord]:
-        imported = self._load_accounts_from_source_db()
-        if not imported:
-            imported = self._scan_source_directories()
-        local_accounts = [
-            account
-            for account in self._read_accounts_snapshot()
-            if account.source.startswith("local_") and not self._is_legacy_placeholder(account)
-        ]
-        merged_accounts = self._merge_accounts(imported, local_accounts)
+        discovered = self._scan_managed_profiles()
+        existing_accounts = self._read_accounts_snapshot()
+        merged_accounts = self._merge_scanned_accounts(discovered, existing_accounts)
+        merged_accounts, _ = self._normalize_snapshot_accounts(merged_accounts)
         self._write_accounts_snapshot(merged_accounts)
         return merged_accounts
 
@@ -108,10 +101,9 @@ class ProfileStore:
         accounts = self._read_accounts_snapshot()
         created_at = datetime.now().astimezone()
         account_id = self._next_local_account_id(accounts, created_at=created_at)
-        prepared_profile_dir = (self.paths.prepared_profiles_root / account_id).resolve()
+        prepared_profile_dir = self._managed_profile_root(account_id)
         prepared_profile_dir.mkdir(parents=True, exist_ok=True)
-        prepared_home_dir = prepared_profile_dir / "home"
-        prepared_home_dir.mkdir(parents=True, exist_ok=True)
+        prepared_home_dir = sync_profile_home(prepared_profile_dir / "home")
 
         account = AccountRecord(
             id=account_id,
@@ -153,8 +145,7 @@ class ProfileStore:
         accounts = self._read_accounts_snapshot()
         now = datetime.now().astimezone()
         existing = next((account for account in accounts if account.id == account_id), None)
-        resolved_home_dir = home_dir.expanduser().resolve()
-        resolved_home_dir.mkdir(parents=True, exist_ok=True)
+        resolved_home_dir = sync_profile_home(home_dir)
         account = AccountRecord(
             id=account_id,
             label=label.strip() or account_id,
@@ -239,7 +230,9 @@ class ProfileStore:
     def load_accounts(self) -> tuple[list[AccountRecord], SwitcherConfig]:
         config = self.load_config()
         accounts = self._read_accounts_snapshot()
-        accounts, config = self._prune_legacy_placeholders(accounts, config)
+        accounts, accounts_changed = self._normalize_snapshot_accounts(accounts)
+        if accounts_changed:
+            self._write_accounts_snapshot(accounts)
         if not accounts:
             accounts = self.import_accounts()
             config = self.load_config()
@@ -250,8 +243,8 @@ class ProfileStore:
         for account in accounts:
             account.app_primary = account.id == resolved_primary
             account.mapped_codex_profile = config.launch_profiles.get(account.id)
-            if not account.home_dir.exists():
-                account.issues.append("Imported flutty profile home is missing.")
+            if not account.home_dir.exists() and "Managed profile home is missing." not in account.issues:
+                account.issues.append("Managed profile home is missing.")
 
         accounts.sort(
             key=lambda account: (
@@ -275,9 +268,14 @@ class ProfileStore:
         return updated
 
     def copy_account_auth_to_main_codex(self, account_id: str) -> Path:
-        account = next((account for account in self._read_accounts_snapshot() if account.id == account_id), None)
+        accounts = self._read_accounts_snapshot()
+        account = next((account for account in accounts if account.id == account_id), None)
         if account is None:
             raise ValueError(f"Unknown account: {account_id}")
+        normalized_home_dir = self._normalize_account_home_dir(account)
+        if normalized_home_dir != account.home_dir.expanduser().resolve():
+            account.home_dir = normalized_home_dir
+            self._write_accounts_snapshot(accounts)
 
         source_auth_path = codex_home_path(account.home_dir) / "auth.json"
         if not source_auth_path.is_file():
@@ -408,92 +406,33 @@ class ProfileStore:
             )
         return accounts
 
-    def _load_accounts_from_source_db(self) -> list[AccountRecord]:
-        db_path = self.paths.source_relay_db_path
-        if not db_path.exists():
-            return []
+    def _scan_managed_profiles(self) -> list[AccountRecord]:
+        results: list[AccountRecord] = []
+        profiles_root = self.paths.prepared_profiles_root.expanduser().resolve()
+        if not profiles_root.exists():
+            return results
 
-        connection: sqlite3.Connection | None = None
-        try:
-            connection = sqlite3.connect(str(db_path))
-            connection.row_factory = sqlite3.Row
-            with connection:
-                tables = {
-                    row["name"]
-                    for row in connection.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table'"
-                    ).fetchall()
-                }
-                if "accounts" not in tables:
-                    return []
-                rows = connection.execute(
-                    """
-                    SELECT id, label, home_dir, status, enabled, is_primary, last_error, created_at, updated_at
-                    FROM accounts
-                    ORDER BY created_at ASC
-                    """
-                ).fetchall()
-        except sqlite3.DatabaseError:
-            return []
-        finally:
-            try:
-                if connection is not None:
-                    connection.close()
-            except Exception:
-                pass
-
-        accounts: list[AccountRecord] = []
-        for row in rows:
-            home_dir = Path(str(row["home_dir"])).expanduser()
-            label = str(row["label"] or row["id"] or "").strip() or str(row["id"])
-            if label.startswith("Pending account "):
+        for child in sorted(profiles_root.iterdir()):
+            if not child.is_dir():
                 continue
-            accounts.append(
+            home_dir = child / "home" if (child / "home").is_dir() else child
+            synced_home_dir = sync_profile_home(home_dir)
+            has_auth = (codex_home_path(synced_home_dir) / "auth.json").is_file()
+            results.append(
                 AccountRecord(
-                    id=str(row["id"]),
-                    label=label,
-                    home_dir=home_dir,
-                    status=str(row["status"] or "unknown"),
-                    enabled=bool(row["enabled"]),
-                    flutty_primary=bool(row["is_primary"]),
-                    last_error=str(row["last_error"]) if row["last_error"] else None,
-                    created_at=_parse_timestamp(row["created_at"]),
-                    updated_at=_parse_timestamp(row["updated_at"]),
-                    avatar_path=_find_avatar(home_dir),
-                    source="imported_db",
+                    id=child.name,
+                    label=child.name,
+                    home_dir=synced_home_dir,
+                    status="connected" if has_auth else "available",
+                    enabled=True,
+                    flutty_primary=False,
+                    last_error=None,
+                    created_at=_stat_datetime(child),
+                    updated_at=_stat_datetime(synced_home_dir),
+                    avatar_path=_find_avatar(synced_home_dir),
+                    source="managed_profile",
                 )
             )
-        return accounts
-
-    def _scan_source_directories(self) -> list[AccountRecord]:
-        results: list[AccountRecord] = []
-        seen_ids: set[str] = set()
-        for root in (self.paths.source_accounts_dir, self.paths.source_profiles_dir):
-            if not root.exists():
-                continue
-            for child in sorted(root.iterdir()):
-                if not child.is_dir():
-                    continue
-                home_dir = child / "home" if (child / "home").is_dir() else child
-                account_id = child.name
-                if account_id in seen_ids:
-                    continue
-                seen_ids.add(account_id)
-                results.append(
-                    AccountRecord(
-                        id=account_id,
-                        label=account_id,
-                        home_dir=home_dir,
-                        status="available",
-                        enabled=True,
-                        flutty_primary=False,
-                        last_error=None,
-                        created_at=_stat_datetime(child),
-                        updated_at=_stat_datetime(home_dir),
-                        avatar_path=_find_avatar(home_dir),
-                        source="imported_scan",
-                    )
-                )
         return results
 
     def _read_json(self, path: Path) -> Any:
@@ -530,6 +469,47 @@ class ProfileStore:
             merged[account.id] = account
         return list(merged.values())
 
+    def _merge_scanned_accounts(
+        self,
+        discovered_accounts: list[AccountRecord],
+        existing_accounts: list[AccountRecord],
+    ) -> list[AccountRecord]:
+        existing_by_id = {account.id: account for account in existing_accounts}
+        merged_accounts: list[AccountRecord] = []
+
+        for discovered in discovered_accounts:
+            existing = existing_by_id.get(discovered.id)
+            if existing is None:
+                merged_accounts.append(discovered)
+                continue
+
+            existing_source = self._normalize_account_source(existing.source)
+            is_local = existing_source.startswith("local_")
+            merged_accounts.append(
+                AccountRecord(
+                    id=discovered.id,
+                    label=existing.label.strip() or discovered.label,
+                    home_dir=discovered.home_dir,
+                    status=existing.status if is_local else discovered.status,
+                    enabled=existing.enabled if is_local else discovered.enabled,
+                    flutty_primary=False,
+                    created_at=existing.created_at or discovered.created_at,
+                    updated_at=existing.updated_at or discovered.updated_at,
+                    avatar_path=_find_avatar(discovered.home_dir) or existing.avatar_path or discovered.avatar_path,
+                    mapped_codex_profile=existing.mapped_codex_profile,
+                    app_primary=existing.app_primary,
+                    source=existing_source if is_local else discovered.source,
+                    identity=existing.identity,
+                    rate_limits=existing.rate_limits,
+                    auth_mode=existing.auth_mode,
+                    oauth=existing.oauth,
+                    last_error=existing.last_error,
+                    issues=list(existing.issues),
+                )
+            )
+
+        return merged_accounts
+
     def _next_local_account_id(
         self,
         accounts: list[AccountRecord],
@@ -549,59 +529,79 @@ class ProfileStore:
         local_count = sum(1 for account in accounts if account.source.startswith("local_"))
         return f"New isolated account {local_count + 1}"
 
-    def _normalize_launch_profile_path(self, path: Path) -> Path:
+    def _normalize_launch_profile_path(self, path: Path, *, account_id: str | None = None) -> Path:
+        del account_id
         resolved = path.expanduser().resolve()
+        prepared_profiles_root = self.paths.prepared_profiles_root.expanduser().resolve()
         if resolved.name != "home":
             return resolved
-        prepared_profiles_root = self.paths.prepared_profiles_root.expanduser().resolve()
         try:
             resolved.relative_to(prepared_profiles_root)
         except ValueError:
             return resolved
         return resolved.parent
 
+    def _normalize_snapshot_accounts(self, accounts: list[AccountRecord]) -> tuple[list[AccountRecord], bool]:
+        changed = False
+        normalized_accounts: list[AccountRecord] = []
+        for account in accounts:
+            normalized_source = self._normalize_account_source(account.source)
+            if normalized_source != account.source:
+                account.source = normalized_source
+                changed = True
+
+            normalized_home_dir = self._normalize_account_home_dir(account)
+            if normalized_home_dir != account.home_dir.expanduser().resolve():
+                account.home_dir = normalized_home_dir
+                account.avatar_path = _find_avatar(normalized_home_dir) or account.avatar_path
+                changed = True
+
+            if account.flutty_primary:
+                account.flutty_primary = False
+                changed = True
+
+            if not account.source.startswith("local_") and not account.profile_root.exists():
+                changed = True
+                continue
+
+            normalized_accounts.append(account)
+        return normalized_accounts, changed
+
+    def _normalize_account_home_dir(self, account: AccountRecord) -> Path:
+        resolved_home_dir = account.home_dir.expanduser().resolve()
+        prepared_profiles_root = self.paths.prepared_profiles_root.expanduser().resolve()
+        if self._is_within(resolved_home_dir, prepared_profiles_root):
+            return sync_profile_home(resolved_home_dir) if resolved_home_dir.exists() else resolved_home_dir
+
+        managed_home_dir = self._managed_home_dir(account.id)
+        if account.source.startswith("local_"):
+            return sync_profile_home(managed_home_dir)
+        if managed_home_dir.exists():
+            return sync_profile_home(managed_home_dir)
+        return managed_home_dir
+
+    def _managed_profile_root(self, account_id: str) -> Path:
+        return (self.paths.prepared_profiles_root / account_id).expanduser().resolve()
+
+    def _managed_home_dir(self, account_id: str) -> Path:
+        return self._managed_profile_root(account_id) / "home"
+
     @staticmethod
-    def _is_legacy_placeholder(account: AccountRecord) -> bool:
-        return (
-            account.source == "local_created"
-            and account.status == "pending_oauth"
-            and account.label.startswith("New isolated account ")
-        )
+    def _is_within(path: Path, root: Path) -> bool:
+        try:
+            path.expanduser().resolve().relative_to(root.expanduser().resolve())
+            return True
+        except ValueError:
+            return False
 
-    def _prune_legacy_placeholders(
-        self,
-        accounts: list[AccountRecord],
-        config: SwitcherConfig,
-    ) -> tuple[list[AccountRecord], SwitcherConfig]:
-        legacy_account_ids = {
-            account.id for account in accounts if self._is_legacy_placeholder(account)
-        }
-        if not legacy_account_ids:
-            return accounts, config
-
-        filtered_accounts = [
-            account for account in accounts if account.id not in legacy_account_ids
-        ]
-        filtered_launch_profiles = {
-            account_id: path
-            for account_id, path in config.launch_profiles.items()
-            if account_id not in legacy_account_ids
-        }
-        updated_config = SwitcherConfig(
-            primary_account_id=(
-                None if config.primary_account_id in legacy_account_ids else config.primary_account_id
-            ),
-            last_selected_account_id=(
-                None
-                if config.last_selected_account_id in legacy_account_ids
-                else config.last_selected_account_id
-            ),
-            codex_app_path=config.codex_app_path,
-            launch_profiles=filtered_launch_profiles,
-        )
-        self._write_accounts_snapshot(filtered_accounts)
-        self.save_config(updated_config)
-        return filtered_accounts, updated_config
+    @staticmethod
+    def _normalize_account_source(source: str | None) -> str:
+        normalized = (source or "").strip()
+        if not normalized or normalized == "snapshot":
+            return "managed_profile"
+        if normalized.startswith("imported_") or normalized == "scan":
+            return "managed_profile"
+        return normalized
 
 
 def _parse_timestamp(value: Any) -> datetime | None:

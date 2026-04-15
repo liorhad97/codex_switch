@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import signal
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from codex_profile_switcher.launcher import (
     DEFAULT_CODEX_APP_PATH,
@@ -12,6 +13,9 @@ from codex_profile_switcher.launcher import (
     codex_launch_env,
     is_default_codex_running,
     is_safe_codex_user_data_dir,
+    launch_codex,
+    running_codex_pids,
+    terminate_running_codex,
 )
 
 
@@ -30,7 +34,7 @@ class LauncherTests(unittest.TestCase):
             env = codex_launch_env(Path("/tmp/codex-switcher/account-3"), Path("/tmp/codex/home"))
         self.assertEqual(env, {"BASE_ENV": "1"})
 
-    def test_build_command_ignores_legacy_profile_arguments(self) -> None:
+    def test_build_command_ignores_profile_arguments(self) -> None:
         target = Path("/tmp/codex-switcher/account-4")
         account_home_dir = Path("/tmp/codex-switcher/account-4/home")
         command = build_codex_launch_command(DEFAULT_CODEX_APP_PATH, target, account_home_dir)
@@ -41,6 +45,49 @@ class LauncherTests(unittest.TestCase):
         process_listing = f"123 {executable}\n"
         with patch("subprocess.check_output", return_value=process_listing):
             self.assertTrue(is_default_codex_running())
+
+    def test_running_codex_pids_detects_matching_process(self) -> None:
+        executable = codex_executable_path(DEFAULT_CODEX_APP_PATH)
+        process_listing = f"123 {executable}\n456 /bin/bash\n"
+        with patch("subprocess.check_output", return_value=process_listing):
+            self.assertEqual(running_codex_pids(DEFAULT_CODEX_APP_PATH), [123])
+
+    def test_terminate_running_codex_sends_sigterm(self) -> None:
+        with (
+            patch("codex_profile_switcher.launcher.running_codex_pids", return_value=[123]),
+            patch("codex_profile_switcher.launcher._wait_for_codex_exit", return_value=set()) as wait_for_exit,
+            patch("os.kill") as kill,
+        ):
+            self.assertTrue(terminate_running_codex(DEFAULT_CODEX_APP_PATH))
+
+        kill.assert_called_once_with(123, signal.SIGTERM)
+        wait_for_exit.assert_called_once_with(DEFAULT_CODEX_APP_PATH, {123}, 5.0)
+
+    def test_terminate_running_codex_force_kills_stuck_processes(self) -> None:
+        with (
+            patch("codex_profile_switcher.launcher.running_codex_pids", return_value=[123]),
+            patch("codex_profile_switcher.launcher._wait_for_codex_exit", side_effect=[{123}, set()]) as wait_for_exit,
+            patch("os.kill") as kill,
+        ):
+            self.assertTrue(terminate_running_codex(DEFAULT_CODEX_APP_PATH))
+
+        self.assertEqual(
+            kill.call_args_list,
+            [call(123, signal.SIGTERM), call(123, signal.SIGKILL)],
+        )
+        self.assertEqual(wait_for_exit.call_count, 2)
+
+    def test_launch_codex_restarts_existing_instance_before_reopening(self) -> None:
+        executable = codex_executable_path(DEFAULT_CODEX_APP_PATH)
+        with (
+            patch("codex_profile_switcher.launcher.terminate_running_codex") as terminate_running,
+            patch("subprocess.Popen") as popen,
+        ):
+            launch_codex(DEFAULT_CODEX_APP_PATH)
+
+        terminate_running.assert_called_once_with(DEFAULT_CODEX_APP_PATH)
+        popen.assert_called_once()
+        self.assertEqual(popen.call_args.args[0], [str(executable)])
 
 
 if __name__ == "__main__":

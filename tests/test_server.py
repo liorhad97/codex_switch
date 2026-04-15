@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 import tempfile
 import unittest
 from dataclasses import asdict
@@ -88,18 +87,12 @@ class SwitcherServerTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.paths = AppPaths(
-            source_flutty_data_root=self.root / "flutty_orc_data",
-            source_relay_db_path=self.root / "flutty_orc_data" / "codex_relay.db",
-            source_profiles_dir=self.root / "flutty_orc_data" / "profiles",
-            source_accounts_dir=self.root / "flutty_orc_data" / "accounts",
             data_root=self.root / "codex_switch_data",
             config_path=self.root / "codex_switch_data" / "config.json",
             accounts_snapshot_path=self.root / "codex_switch_data" / "accounts.json",
-            prepared_profiles_root=self.root / "codex_switch_data" / "prepared_profiles",
+            prepared_profiles_root=self.root / "llm_accounts_profiles" / "codex" / "profiles",
             main_codex_home=self.root / "main_codex_home",
         )
-        self.paths.source_flutty_data_root.mkdir(parents=True, exist_ok=True)
-        self.paths.source_profiles_dir.mkdir(parents=True, exist_ok=True)
         self.store = ProfileStore(self.paths)
         self.static_root = self.root / "web-dist"
         self.static_root.mkdir(parents=True, exist_ok=True)
@@ -108,21 +101,7 @@ class SwitcherServerTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_build_state_merges_live_flutty_rate_limits(self) -> None:
-        self._write_accounts_db(
-            [
-                {
-                    "id": "alpha",
-                    "label": "alpha@example.com",
-                    "home_dir": str(self.paths.source_profiles_dir / "alpha" / "home"),
-                    "status": "connected",
-                    "enabled": 1,
-                    "is_primary": 0,
-                    "created_at": "2026-04-01T10:00:00+00:00",
-                    "updated_at": "2026-04-01T10:05:00+00:00",
-                }
-            ]
-        )
-        (self.paths.source_profiles_dir / "alpha" / "home").mkdir(parents=True, exist_ok=True)
+        self._write_auth(self.paths.prepared_profiles_root / "alpha" / "home")
         self.store.import_accounts()
 
         server = SwitcherServer(("127.0.0.1", 0), static_root=self.static_root, store=self.store, oauth_manager=FakeOAuthManager())
@@ -153,33 +132,9 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertEqual(payload["accounts"][0]["rate_limits"]["primary"]["usedPercent"], 25)
         self.assertEqual(payload["accounts"][0]["last_error"], "Temporary warning")
 
-    def test_build_state_refreshes_all_auth_backed_imported_account_rate_limits_directly(self) -> None:
-        self._write_accounts_db(
-            [
-                {
-                    "id": "alpha",
-                    "label": "alpha@example.com",
-                    "home_dir": str(self.paths.source_profiles_dir / "alpha" / "home"),
-                    "status": "connected",
-                    "enabled": 1,
-                    "is_primary": 0,
-                    "created_at": "2026-04-01T10:00:00+00:00",
-                    "updated_at": "2026-04-01T10:05:00+00:00",
-                },
-                {
-                    "id": "beta",
-                    "label": "beta@example.com",
-                    "home_dir": str(self.paths.source_profiles_dir / "beta" / "home"),
-                    "status": "connected",
-                    "enabled": 1,
-                    "is_primary": 0,
-                    "created_at": "2026-04-02T10:00:00+00:00",
-                    "updated_at": "2026-04-02T10:05:00+00:00",
-                },
-            ]
-        )
+    def test_build_state_refreshes_all_auth_backed_managed_account_rate_limits_directly(self) -> None:
         for account_id in ("alpha", "beta"):
-            self._write_auth(self.paths.source_profiles_dir / account_id / "home")
+            self._write_auth(self.paths.prepared_profiles_root / account_id / "home")
         self.store.import_accounts()
         self.store.set_selected_account(self.store.load_config(), "beta")
         oauth_manager = FakeOAuthManager()
@@ -384,36 +339,6 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertEqual(build_command.call_args.args, (self.store.load_config().codex_app_path,))
         self.assertEqual(launch_codex.call_args.args, (self.store.load_config().codex_app_path,))
         self.assertEqual(server.store.load_config().primary_account_id, "local-1")
-
-    def _write_accounts_db(self, rows: list[dict[str, object]]) -> None:
-        connection = sqlite3.connect(str(self.paths.source_relay_db_path))
-        with connection:
-            connection.execute(
-                """
-                CREATE TABLE accounts (
-                    id TEXT PRIMARY KEY,
-                    label TEXT NOT NULL,
-                    home_dir TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    is_primary INTEGER NOT NULL DEFAULT 0,
-                    last_error TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-                """
-            )
-            for row in rows:
-                connection.execute(
-                    """
-                    INSERT INTO accounts (
-                        id, label, home_dir, status, enabled, is_primary, created_at, updated_at
-                    )
-                    VALUES (:id, :label, :home_dir, :status, :enabled, :is_primary, :created_at, :updated_at)
-                    """,
-                    row,
-                )
-        connection.close()
 
     def _write_auth(self, home_dir: Path) -> Path:
         auth_path = home_dir / ".codex" / "auth.json"
