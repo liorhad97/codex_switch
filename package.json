@@ -1,7 +1,7 @@
 {
   "name": "codex-switch",
   "productName": "codex switch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "main": "electron/main.cjs",
   "type": "module",
@@ -10,60 +10,28 @@
     "build:backend": "node scripts/build-backend.cjs",
     "backend": "python3 -m codex_profile_switcher.server --static-root ./web/dist",
     "electron": "npm run web:build && electron electron/main.cjs",
-    "dist": "npm run web:build && npm run build:backend && electron-builder --publish never",
-    "dist:mac": "npm run web:build && npm run build:backend && electron-builder --mac --publish never",
-    "dist:win": "npm run web:build && npm run build:backend && electron-builder --win --publish never",
+    "dist": "npm run web:build && npm run build:backend && electron-builder --config electron-builder.config.cjs --publish never",
+    "dist:mac": "npm run web:build && npm run build:backend && electron-builder --config electron-builder.config.cjs --mac -c.directories.output=mac-installer --publish never",
+    "dist:win": "npm run web:build && npm run build:backend && electron-builder --config electron-builder.config.cjs --win -c.directories.output=windows-installer --publish never",
+    "publish:updates": "node scripts/publish-r2-updates.cjs",
     "test:web-build": "vite build"
   },
-  "build": {
-    "appId": "com.codexswitch.desktop",
-    "productName": "codex switch",
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "electron/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "web/dist",
-        "to": "web/dist"
-      },
-      {
-        "from": "dist/backend",
-        "to": "backend"
-      }
-    ],
-    "asar": true,
-    "mac": {
-      "icon": "electron/assets/codex-switch-icon.icns",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "category": "public.app-category.productivity"
-    },
-    "win": {
-      "icon": "electron/assets/codex-switch-icon.ico",
-      "target": [
-        "nsis",
-        "zip"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
+  "codexSwitch": {
+    "updateBaseUrlEnv": "CODEX_SWITCH_UPDATE_BASE_URL",
+    "defaultUpdateBaseUrl": "https://pub-1fc6be6e977a4adf8a928d5e615d8f54.r2.dev",
+    "defaultR2Bucket": "codex-switch-updates"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.0",
     "electron": "^37.2.0",
     "electron-builder": "^26.8.1",
     "playwright": "^1.59.1",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "wrangler": "^4.85.0"
   }
 }

@@ -318,6 +318,32 @@ code {
   gap: 12px;
 }
 
+.relay-update-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.relay-update-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.relay-update-message,
+.relay-update-meta {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.relay-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .relay-pending-code {
   margin: 0;
   color: var(--text);

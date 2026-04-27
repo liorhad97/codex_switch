@@ -545,6 +545,30 @@ def _detect_flutty_api_base() -> str | None:
     return None
 
 
+def _is_address_in_use_error(error: OSError) -> bool:
+    return getattr(error, "errno", None) in {48, 98} or "Address already in use" in str(error)
+
+
+def _backend_is_healthy(host: str, port: int) -> bool:
+    try:
+        with urllib_request.urlopen(f"http://{host}:{port}/api/health", timeout=0.5) as response:
+            return response.status == 200
+    except (OSError, TimeoutError, ValueError, urllib_error.URLError):
+        return False
+
+
+def _port_conflict_message(host: str, port: int) -> str:
+    if _backend_is_healthy(host, port):
+        return (
+            f"codex switch backend is already running at http://{host}:{port}. "
+            "Quit the other app instance first, or start this copy with a different CODEX_SWITCH_PORT."
+        )
+    return (
+        f"Port {port} on {host} is already in use by another process. "
+        "Start codex switch with a different CODEX_SWITCH_PORT."
+    )
+
+
 def run_server(*, host: str, port: int, static_root: Path) -> None:
     static_root.mkdir(parents=True, exist_ok=True)
     server = SwitcherServer((host, port), static_root=static_root, store=ProfileStore())
@@ -569,7 +593,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    run_server(host=args.host, port=args.port, static_root=Path(args.static_root).expanduser().resolve())
+    try:
+        run_server(host=args.host, port=args.port, static_root=Path(args.static_root).expanduser().resolve())
+    except OSError as error:
+        if _is_address_in_use_error(error):
+            raise SystemExit(_port_conflict_message(args.host, args.port)) from None
+        raise
 
 
 if __name__ == "__main__":

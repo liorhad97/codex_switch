@@ -17,13 +17,16 @@ jobs:
           - name: macOS
             os: macos-latest
             script: dist:mac
+            artifact_path: mac-installer/*
           - name: Windows
             os: windows-latest
             script: dist:win
+            artifact_path: windows-installer/*
 
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: false
       PYTHON: python
+      CODEX_SWITCH_UPDATE_BASE_URL: https://pub-1fc6be6e977a4adf8a928d5e615d8f54.r2.dev
 
     steps:
       - name: Check out repository
@@ -52,4 +55,37 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: codex-switch-${{ matrix.name }}
-          path: release/*
+          path: ${{ matrix.artifact_path }}
+
+  publish-updates:
+    name: Publish updates to Cloudflare R2
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      CODEX_SWITCH_R2_BUCKET: codex-switch-updates
+      CODEX_SWITCH_UPDATE_BASE_URL: https://pub-1fc6be6e977a4adf8a928d5e615d8f54.r2.dev
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          pattern: codex-switch-*
+          merge-multiple: true
+
+      - name: Publish release artifacts to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npm run publish:updates

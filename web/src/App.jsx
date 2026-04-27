@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const USAGE_REFRESH_INTERVAL_MS = 60_000;
+const updaterBridge = typeof window !== "undefined" ? window.codexSwitchUpdater || null : null;
 
 async function request(path, options = {}) {
   const response = await fetch(path, {
@@ -65,13 +66,76 @@ function formatResetAtDisplay(window) {
   return `Resets ${date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 
-function buildUsageSummary(account) {
-  const parts = [];
-  if (account.rate_limits?.primary) {
-    parts.push(`5h ${formatUsagePercent(account.rate_limits.primary.usedPercent)}`);
+function getWindowDuration(window) {
+  const minutes = window?.windowDurationMins;
+  if (typeof minutes !== "number" || Number.isNaN(minutes) || minutes <= 0) {
+    return null;
   }
-  if (account.rate_limits?.secondary || isFreeAccount(account)) {
-    parts.push(`Weekly ${formatUsagePercent(account.rate_limits?.secondary?.usedPercent)}`);
+  return minutes;
+}
+
+function isWeeklyDuration(minutes) {
+  return typeof minutes === "number" && minutes >= 10080;
+}
+
+function formatWindowShortLabel(window, fallback) {
+  const minutes = getWindowDuration(window);
+  if (minutes === null) {
+    return fallback;
+  }
+  if (isWeeklyDuration(minutes)) {
+    return "Weekly";
+  }
+  if (minutes % 60 === 0) {
+    return `${minutes / 60}h`;
+  }
+  return `${minutes}m`;
+}
+
+function getUsageWindows(account) {
+  const windows = [account?.rate_limits?.primary, account?.rate_limits?.secondary].filter(
+    (window) => window && typeof window === "object"
+  );
+  let hourlyWindow = null;
+  let weeklyWindow = null;
+
+  for (const window of windows) {
+    const minutes = getWindowDuration(window);
+    if (minutes === null) {
+      continue;
+    }
+    if (isWeeklyDuration(minutes)) {
+      if (!weeklyWindow || minutes > getWindowDuration(weeklyWindow)) {
+        weeklyWindow = window;
+      }
+      continue;
+    }
+    if (!hourlyWindow || minutes < getWindowDuration(hourlyWindow)) {
+      hourlyWindow = window;
+    }
+  }
+
+  if (!hourlyWindow && !weeklyWindow) {
+    return {
+      hourly: account?.rate_limits?.primary || null,
+      weekly: account?.rate_limits?.secondary || null
+    };
+  }
+
+  return {
+    hourly: hourlyWindow,
+    weekly: weeklyWindow
+  };
+}
+
+function buildUsageSummary(account) {
+  const usageWindows = getUsageWindows(account);
+  const parts = [];
+  if (usageWindows.hourly) {
+    parts.push(`${formatWindowShortLabel(usageWindows.hourly, "Usage")} ${formatUsagePercent(usageWindows.hourly.usedPercent)}`);
+  }
+  if (usageWindows.weekly) {
+    parts.push(`${formatWindowShortLabel(usageWindows.weekly, "Weekly")} ${formatUsagePercent(usageWindows.weekly.usedPercent)}`);
   }
   if (parts.length > 0) {
     return parts.join(" • ");
@@ -96,7 +160,7 @@ function hasKnownResetTime(window) {
 }
 
 function hasPickableWeeklyWindow(account) {
-  const weeklyWindow = account?.rate_limits?.secondary;
+  const weeklyWindow = getUsageWindows(account).weekly;
   return typeof getRemainingFraction(weeklyWindow) === "number" && hasKnownResetTime(weeklyWindow);
 }
 
@@ -105,13 +169,19 @@ function isPickableAccount(account) {
 }
 
 function isFreeAccount(account) {
-  const weeklyRemaining = getRemainingFraction(account?.rate_limits?.secondary);
-  return Boolean(isPickableAccount(account) && hasUsageData(account) && typeof weeklyRemaining !== "number");
+  const usageWindows = getUsageWindows(account);
+  const rateLimitPlanType = account?.rate_limits?.planType;
+  return Boolean(
+    isPickableAccount(account) &&
+      hasUsageData(account) &&
+      (rateLimitPlanType === "free" || (!usageWindows.hourly && usageWindows.weekly))
+  );
 }
 
 function calculatePlusAccountUsageCost(account) {
-  const hourlyRemaining = getRemainingFraction(account?.rate_limits?.primary);
-  const weeklyRemaining = getRemainingFraction(account?.rate_limits?.secondary);
+  const usageWindows = getUsageWindows(account);
+  const hourlyRemaining = getRemainingFraction(usageWindows.hourly);
+  const weeklyRemaining = getRemainingFraction(usageWindows.weekly);
   const knownWindows = [hourlyRemaining, weeklyRemaining].filter((value) => typeof value === "number");
   const hasHourly = typeof hourlyRemaining === "number";
   const hasWeekly = typeof weeklyRemaining === "number";
@@ -119,6 +189,8 @@ function calculatePlusAccountUsageCost(account) {
   if (
     !isPickableAccount(account) ||
     !hasPickableWeeklyWindow(account) ||
+    !hasHourly ||
+    !hasWeekly ||
     knownWindows.length === 0 ||
     knownWindows.some((value) => value <= 0)
   ) {
@@ -148,14 +220,16 @@ function calculatePlusAccountUsageCost(account) {
 }
 
 function calculateFreeAccountUsageCost(account) {
-  const hourlyRemaining = getRemainingFraction(account?.rate_limits?.primary);
+  const usageWindows = getUsageWindows(account);
+  const bestAvailableWindow = usageWindows.weekly || usageWindows.hourly;
+  const remaining = getRemainingFraction(bestAvailableWindow);
 
-  if (!isFreeAccount(account) || typeof hourlyRemaining !== "number" || hourlyRemaining <= 0) {
+  if (!isFreeAccount(account) || typeof remaining !== "number" || remaining <= 0) {
     return Number.POSITIVE_INFINITY;
   }
 
-  const resetPenalty = hasKnownResetTime(account?.rate_limits?.primary) ? 0 : 0.35;
-  const headroomPenalty = 1 / (hourlyRemaining + 0.05);
+  const resetPenalty = hasKnownResetTime(bestAvailableWindow) ? 0 : 0.35;
+  const headroomPenalty = 1 / (remaining + 0.05);
 
   return resetPenalty + headroomPenalty;
 }
@@ -195,6 +269,19 @@ function getOauthUrl(flow) {
 function getSelectedAccountFromState(payload) {
   const accounts = payload?.accounts || [];
   return accounts.find((account) => account.id === payload?.selected_account_id) || accounts[0] || null;
+}
+
+function formatCheckedAtDisplay(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return `Checked ${date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 
 function UsageStat({ label, window }) {
@@ -286,11 +373,63 @@ function AccountCard({ account, selected, recommended, onSelect }) {
   );
 }
 
+function UpdatePanel({ updateState, busyKey, onDownload, onInstall }) {
+  if (!updateState?.supported || !updateState?.configured) {
+    return null;
+  }
+
+  const checkedAt = formatCheckedAtDisplay(updateState.checkedAt);
+  let actionLabel = null;
+  let action = null;
+  let disabled = false;
+
+  if (busyKey === "download-update" || updateState.phase === "downloading") {
+    const progress = typeof updateState.progressPercent === "number" ? ` ${Math.round(updateState.progressPercent)}%` : "";
+    actionLabel = `Downloading...${progress}`;
+    disabled = true;
+  } else if (busyKey === "install-update") {
+    actionLabel = "Restarting...";
+    disabled = true;
+  } else if (updateState.phase === "available") {
+    actionLabel = updateState.version ? `Download ${updateState.version}` : "Download Update";
+    action = onDownload;
+  } else if (updateState.phase === "downloaded") {
+    actionLabel = "Restart to Update";
+    action = onInstall;
+  }
+
+  return (
+    <section className="relay-usage-stat relay-update-panel">
+      <div className="relay-update-head">
+        <div>
+          <p className="relay-usage-stat-label">App Update</p>
+          <p className="relay-update-message">{updateState.message || "Check for updates."}</p>
+        </div>
+        {updateState.version ? <span className="relay-pill relay-pill-recommended">v{updateState.version}</span> : null}
+      </div>
+      <div className="relay-update-actions">
+        {actionLabel ? (
+          <button
+            type="button"
+            className="relay-account-action"
+            onClick={action}
+            disabled={disabled || !action}
+          >
+            {actionLabel}
+          </button>
+        ) : null}
+        {checkedAt ? <span className="relay-update-meta">{checkedAt}</span> : null}
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState(null);
   const [feedback, setFeedback] = useState("");
+  const [updateState, setUpdateState] = useState(null);
   const usagePollRef = useRef({ token: 0, timeouts: [] });
 
   const stopUsagePolling = () => {
@@ -314,6 +453,35 @@ function App() {
 
   useEffect(() => {
     loadState();
+  }, []);
+
+  useEffect(() => {
+    if (!updaterBridge) {
+      return undefined;
+    }
+
+    let mounted = true;
+    updaterBridge
+      .getState()
+      .then((payload) => {
+        if (mounted) {
+          setUpdateState(payload);
+        }
+      })
+      .catch(() => {
+        // Ignore updater bridge errors in the standalone browser.
+      });
+
+    const unsubscribe = updaterBridge.onStateChanged((payload) => {
+      if (mounted) {
+        setUpdateState(payload);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -354,6 +522,7 @@ function App() {
   const selectedHasUsage = hasUsageData(selectedAccount);
   const selectedOauthFlow = selectedAccount?.oauth || null;
   const selectedOauthUrl = getOauthUrl(selectedOauthFlow);
+  const selectedUsageWindows = getUsageWindows(selectedAccount);
 
   useEffect(() => {
     if (!selectedAccount || selectedHasUsage) {
@@ -446,6 +615,36 @@ function App() {
     } catch {
       // Error is already surfaced in state.
     }
+  };
+
+  const runUpdaterAction = async (key, action) => {
+    if (!updaterBridge) {
+      return;
+    }
+
+    setBusyKey(key);
+    try {
+      const payload = await action();
+      if (payload) {
+        setUpdateState(payload);
+      }
+    } catch (err) {
+      setFeedback(err.message);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const checkForUpdates = async () => {
+    await runUpdaterAction("check-update", () => updaterBridge.checkForUpdates());
+  };
+
+  const downloadUpdate = async () => {
+    await runUpdaterAction("download-update", () => updaterBridge.downloadUpdate());
+  };
+
+  const installUpdate = async () => {
+    await runUpdaterAction("install-update", () => updaterBridge.installUpdate());
   };
 
   const importAccounts = async () => {
@@ -553,6 +752,13 @@ function App() {
 
   const codexDesktopBusy = busyKey === `launch-desktop:${selectedAccount?.id}`;
   const vscodeBusy = busyKey === `launch-vscode:${selectedAccount?.id}`;
+  const canCheckUpdates = Boolean(updaterBridge && updateState?.supported && updateState?.configured);
+  const checkingUpdates = busyKey === "check-update" || updateState?.phase === "checking";
+  const updateActionBusy =
+    checkingUpdates ||
+    busyKey === "download-update" ||
+    busyKey === "install-update" ||
+    updateState?.phase === "downloading";
 
   return (
     <div className="app-frame" aria-busy={loading}>
@@ -592,15 +798,16 @@ function App() {
               >
                 {busyKey === `select:${recommendedAccount?.id}` ? "Choosing..." : "Pick Best"}
               </button>
+              <button
+                type="button"
+                className="relay-header-button"
+                onClick={checkForUpdates}
+                disabled={!canCheckUpdates || updateActionBusy}
+                title={!canCheckUpdates ? updateState?.message || "Automatic updates are available in packaged builds." : undefined}
+              >
+                {checkingUpdates ? "Checking..." : "Check Updates"}
+              </button>
             </div>
-          </div>
-
-          <div className="relay-sidebar-body">
-            {loading ? <p className="relay-empty-copy">Loading accounts...</p> : null}
-
-            {!loading && accounts.length === 0 ? (
-              <p className="relay-empty-copy">No accounts found yet. Use Add Account or Refresh.</p>
-            ) : null}
 
             {pendingOAuthFlow ? (
               <SignInPanel
@@ -610,6 +817,21 @@ function App() {
                 cancelBusy={busyKey === "cancel-pending-oauth"}
               />
             ) : null}
+          </div>
+
+          <div className="relay-sidebar-body">
+            {loading ? <p className="relay-empty-copy">Loading accounts...</p> : null}
+
+            {!loading && accounts.length === 0 ? (
+              <p className="relay-empty-copy">No accounts found yet. Use Add Account or Refresh.</p>
+            ) : null}
+
+            <UpdatePanel
+              updateState={updateState}
+              busyKey={busyKey}
+              onDownload={downloadUpdate}
+              onInstall={installUpdate}
+            />
 
             <div className="relay-account-list">
               {accounts.map((account) => (
@@ -656,8 +878,8 @@ function App() {
 
               {selectedHasUsage ? (
                 <div className="relay-usage-grid">
-                  <UsageStat label="5 hour window" window={selectedAccount.rate_limits?.primary} />
-                  <UsageStat label="Weekly window" window={selectedAccount.rate_limits?.secondary} />
+                  <UsageStat label="5 hour window" window={selectedUsageWindows.hourly} />
+                  <UsageStat label="Weekly window" window={selectedUsageWindows.weekly} />
                 </div>
               ) : !selectedOauthFlow ? (
                 <section className="relay-usage-stat relay-usage-stat-full">
