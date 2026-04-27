@@ -38,6 +38,7 @@
     ],
     "asar": true,
     "mac": {
+      "icon": "electron/assets/codex-switch-icon.icns",
       "target": [
         "dmg",
         "zip"
@@ -45,6 +46,7 @@
       "category": "public.app-category.productivity"
     },
     "win": {
+      "icon": "electron/assets/codex-switch-icon.ico",
       "target": [
         "nsis",
         "zip"
