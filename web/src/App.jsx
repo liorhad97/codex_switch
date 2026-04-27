@@ -91,6 +91,15 @@ function getRemainingFraction(window) {
   return remaining / 100;
 }
 
+function hasKnownResetTime(window) {
+  return typeof window?.resetsAt === "number" && Number.isFinite(window.resetsAt) && window.resetsAt > 0;
+}
+
+function hasPickableWeeklyWindow(account) {
+  const weeklyWindow = account?.rate_limits?.secondary;
+  return typeof getRemainingFraction(weeklyWindow) === "number" && hasKnownResetTime(weeklyWindow);
+}
+
 function calculateAccountUsageCost(account) {
   const hourlyRemaining = getRemainingFraction(account?.rate_limits?.primary);
   const weeklyRemaining = getRemainingFraction(account?.rate_limits?.secondary);
@@ -98,7 +107,7 @@ function calculateAccountUsageCost(account) {
   const hasHourly = typeof hourlyRemaining === "number";
   const hasWeekly = typeof weeklyRemaining === "number";
 
-  if (!account?.enabled || account?.oauth || knownWindows.length === 0) {
+  if (!account?.enabled || account?.oauth || !hasPickableWeeklyWindow(account) || knownWindows.length === 0) {
     return Number.POSITIVE_INFINITY;
   }
 
