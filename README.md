@@ -1,4 +1,4 @@
-# Codex Switch
+# codex switch
 
 This project now runs as a small Electron shell with a Python backend and a React frontend for switching between isolated Codex accounts.
 
@@ -27,6 +27,38 @@ It does not:
 cd /Users/liorhadad/codex_switch
 npm install
 npm run electron
+```
+
+## Build Downloadable Apps
+
+The app is packaged with Electron Builder. The React UI is compiled into `web/dist`, the Python backend is compiled into a standalone executable with PyInstaller, and the final installers are written to `release/`.
+
+Install the build tools once:
+
+```bash
+cd /Users/liorhadad/codex_switch
+npm install
+python3 -m pip install pyinstaller
+```
+
+Build the Mac app on macOS:
+
+```bash
+npm run dist:mac
+```
+
+Build the Windows app on Windows:
+
+```powershell
+npm run dist:win
+```
+
+You normally cannot build the Windows backend executable correctly from macOS. Use a Windows machine, or run the included GitHub Actions workflow from the Actions tab to build both macOS and Windows artifacts.
+
+If PyInstaller is installed under a specific Python version, pass it explicitly:
+
+```bash
+PYTHON=python3.12 npm run dist:mac
 ```
 
 ## Backend Only

@@ -557,7 +557,7 @@ def run_server(*, host: str, port: int, static_root: Path) -> None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the Codex Switch backend server.")
+    parser = argparse.ArgumentParser(description="Run the codex switch backend server.")
     parser.add_argument("--host", default=os.getenv("CODEX_SWITCH_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.getenv("CODEX_SWITCH_PORT", "8765")))
     parser.add_argument(

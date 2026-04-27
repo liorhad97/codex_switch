@@ -4,8 +4,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
 
-const BACKEND_URL = process.env.CODEX_SWITCH_URL || "http://127.0.0.1:8765";
+const APP_NAME = "codex switch";
+const BACKEND_HOST = process.env.CODEX_SWITCH_HOST || "127.0.0.1";
+const BACKEND_PORT = process.env.CODEX_SWITCH_PORT || "8765";
+const BACKEND_URL = process.env.CODEX_SWITCH_URL || `http://${BACKEND_HOST}:${BACKEND_PORT}`;
+const PROJECT_ROOT = path.resolve(__dirname, "..");
 let backendProcess = null;
+
+app.setName(APP_NAME);
 
 function getAppIconPath() {
   const iconPath = path.join(__dirname, "assets", "codex-switch-icon.png");
@@ -43,20 +49,52 @@ function waitForBackend(url, timeoutMs = 15000) {
   });
 }
 
+function getStaticRoot() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "web", "dist");
+  }
+  return path.join(PROJECT_ROOT, "web", "dist");
+}
+
+function getPackagedBackendPath() {
+  const executableName = process.platform === "win32" ? "codex-switch-backend.exe" : "codex-switch-backend";
+  return path.join(process.resourcesPath, "backend", executableName);
+}
+
+function getBackendLaunchConfig() {
+  const serverArgs = ["--host", BACKEND_HOST, "--port", BACKEND_PORT, "--static-root", getStaticRoot()];
+
+  if (app.isPackaged) {
+    const backendPath = getPackagedBackendPath();
+    if (!fs.existsSync(backendPath)) {
+      throw new Error(`Packaged backend was not found at ${backendPath}`);
+    }
+    return {
+      command: backendPath,
+      args: serverArgs,
+      cwd: app.getPath("userData")
+    };
+  }
+
+  return {
+    command: "python3",
+    args: ["-m", "codex_profile_switcher.server", ...serverArgs],
+    cwd: PROJECT_ROOT
+  };
+}
+
 function startBackend() {
-  if (backendProcess) {
+  if (backendProcess || process.env.CODEX_SWITCH_URL) {
     return;
   }
-  const projectRoot = path.resolve(__dirname, "..");
-  backendProcess = spawn(
-    "python3",
-    ["-m", "codex_profile_switcher.server", "--static-root", path.join(projectRoot, "web", "dist")],
-    {
-      cwd: projectRoot,
-      env: process.env,
-      stdio: "inherit"
-    }
-  );
+
+  const backend = getBackendLaunchConfig();
+  backendProcess = spawn(backend.command, backend.args, {
+    cwd: backend.cwd,
+    env: process.env,
+    stdio: app.isPackaged ? "ignore" : "inherit",
+    windowsHide: true
+  });
 
   backendProcess.on("exit", () => {
     backendProcess = null;
@@ -69,6 +107,7 @@ async function createWindow() {
   const icon = getAppIconPath();
 
   const window = new BrowserWindow({
+    title: APP_NAME,
     width: 1320,
     height: 860,
     minWidth: 1080,
@@ -91,6 +130,7 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  app.setAboutPanelOptions({ applicationName: APP_NAME });
   const icon = getAppIconPath();
   if (icon && process.platform === "darwin" && app.dock) {
     app.dock.setIcon(icon);

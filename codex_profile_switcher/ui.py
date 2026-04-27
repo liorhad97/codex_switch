@@ -74,7 +74,7 @@ class AccountSwitcherApp:
         self.refresh_accounts()
 
     def _configure_window(self) -> None:
-        self.root.title("Codex Profile Switcher")
+        self.root.title("codex switch")
         self.root.configure(bg=BG)
         self.root.geometry("1200x760")
         self.root.minsize(980, 640)

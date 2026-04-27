@@ -70,8 +70,8 @@ function buildUsageSummary(account) {
   if (account.rate_limits?.primary) {
     parts.push(`5h ${formatUsagePercent(account.rate_limits.primary.usedPercent)}`);
   }
-  if (account.rate_limits?.secondary) {
-    parts.push(`Weekly ${formatUsagePercent(account.rate_limits.secondary.usedPercent)}`);
+  if (account.rate_limits?.secondary || isFreeAccount(account)) {
+    parts.push(`Weekly ${formatUsagePercent(account.rate_limits?.secondary?.usedPercent)}`);
   }
   if (parts.length > 0) {
     return parts.join(" • ");
@@ -100,14 +100,28 @@ function hasPickableWeeklyWindow(account) {
   return typeof getRemainingFraction(weeklyWindow) === "number" && hasKnownResetTime(weeklyWindow);
 }
 
-function calculateAccountUsageCost(account) {
+function isPickableAccount(account) {
+  return Boolean(account?.enabled && !account?.oauth);
+}
+
+function isFreeAccount(account) {
+  const weeklyRemaining = getRemainingFraction(account?.rate_limits?.secondary);
+  return Boolean(isPickableAccount(account) && hasUsageData(account) && typeof weeklyRemaining !== "number");
+}
+
+function calculatePlusAccountUsageCost(account) {
   const hourlyRemaining = getRemainingFraction(account?.rate_limits?.primary);
   const weeklyRemaining = getRemainingFraction(account?.rate_limits?.secondary);
   const knownWindows = [hourlyRemaining, weeklyRemaining].filter((value) => typeof value === "number");
   const hasHourly = typeof hourlyRemaining === "number";
   const hasWeekly = typeof weeklyRemaining === "number";
 
-  if (!account?.enabled || account?.oauth || !hasPickableWeeklyWindow(account) || knownWindows.length === 0) {
+  if (
+    !isPickableAccount(account) ||
+    !hasPickableWeeklyWindow(account) ||
+    knownWindows.length === 0 ||
+    knownWindows.some((value) => value <= 0)
+  ) {
     return Number.POSITIVE_INFINITY;
   }
 
@@ -133,9 +147,22 @@ function calculateAccountUsageCost(account) {
   );
 }
 
-function getRecommendedAccount(accounts) {
+function calculateFreeAccountUsageCost(account) {
+  const hourlyRemaining = getRemainingFraction(account?.rate_limits?.primary);
+
+  if (!isFreeAccount(account) || typeof hourlyRemaining !== "number" || hourlyRemaining <= 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const resetPenalty = hasKnownResetTime(account?.rate_limits?.primary) ? 0 : 0.35;
+  const headroomPenalty = 1 / (hourlyRemaining + 0.05);
+
+  return resetPenalty + headroomPenalty;
+}
+
+function getBestAccountByCost(accounts, calculateCost) {
   return (accounts || []).reduce((bestAccount, candidate) => {
-    const candidateCost = calculateAccountUsageCost(candidate);
+    const candidateCost = calculateCost(candidate);
     if (!Number.isFinite(candidateCost)) {
       return bestAccount;
     }
@@ -144,9 +171,21 @@ function getRecommendedAccount(accounts) {
       return candidate;
     }
 
-    const bestCost = calculateAccountUsageCost(bestAccount);
+    const bestCost = calculateCost(bestAccount);
     return candidateCost < bestCost ? candidate : bestAccount;
   }, null);
+}
+
+function getRecommendedPlusAccount(accounts) {
+  return getBestAccountByCost(accounts, calculatePlusAccountUsageCost);
+}
+
+function getRecommendedFreeAccount(accounts) {
+  return getBestAccountByCost(accounts, calculateFreeAccountUsageCost);
+}
+
+function getRecommendedAccount(accounts) {
+  return getRecommendedPlusAccount(accounts) || getRecommendedFreeAccount(accounts);
 }
 
 function getOauthUrl(flow) {
@@ -233,6 +272,7 @@ function AccountCard({ account, selected, recommended, onSelect }) {
           <div className="relay-account-title-row">
             <h3 className="relay-account-title">{account.title}</h3>
             {account.app_primary ? <span className="relay-pill relay-pill-primary">Primary</span> : null}
+            {isFreeAccount(account) ? <span className="relay-pill relay-pill-free">Free</span> : null}
             {recommended ? <span className="relay-pill relay-pill-recommended">Recommended</span> : null}
           </div>
           <p className="relay-account-copy">{buildUsageSummary(account)}</p>
@@ -308,7 +348,9 @@ function App() {
   const pendingOAuthFlow = state?.pending_oauth_flow || null;
   const selectedAccount =
     accounts.find((account) => account.id === state?.selected_account_id) || accounts[0] || null;
-  const recommendedAccount = getRecommendedAccount(accounts);
+  const recommendedPlusAccount = getRecommendedPlusAccount(accounts);
+  const recommendedAccount = recommendedPlusAccount || getRecommendedFreeAccount(accounts);
+  const recommendedIsFreeFallback = Boolean(recommendedAccount && !recommendedPlusAccount && isFreeAccount(recommendedAccount));
   const selectedHasUsage = hasUsageData(selectedAccount);
   const selectedOauthFlow = selectedAccount?.oauth || null;
   const selectedOauthUrl = getOauthUrl(selectedOauthFlow);
@@ -390,13 +432,17 @@ function App() {
 
   const selectRecommendedAccount = async () => {
     if (!recommendedAccount) {
-      setFeedback("No account has enough usage data yet to recommend one.");
+      setFeedback("No Plus or free account has enough usage data yet to recommend one.");
       return;
     }
 
     try {
       await selectAccount(recommendedAccount.id);
-      setFeedback(`Selected ${recommendedAccount.title} as the best balanced account for current usage.`);
+      setFeedback(
+        recommendedIsFreeFallback
+          ? `Selected ${recommendedAccount.title} as the best free account because no Plus account has usage left.`
+          : `Selected ${recommendedAccount.title} as the best balanced account for current usage.`
+      );
     } catch {
       // Error is already surfaced in state.
     }
@@ -465,7 +511,7 @@ function App() {
   const removeSelectedAccount = async () => {
     if (!selectedAccount) return;
     const confirmed = window.confirm(
-      `Remove ${selectedAccount.title}? This deletes its managed profile folder and removes it from Codex Switch.`
+      `Remove ${selectedAccount.title}? This deletes its managed profile folder and removes it from codex switch.`
     );
     if (!confirmed) {
       return;
@@ -514,7 +560,7 @@ function App() {
         <aside className="relay-sidebar">
           <div className="relay-sidebar-header">
             <div>
-              <h1 className="relay-page-title">Codex Switch</h1>
+              <h1 className="relay-page-title">codex switch</h1>
               <p className="relay-page-copy">Pick an account, see remaining usage, and open it.</p>
             </div>
             <div className="relay-header-actions">

@@ -127,7 +127,7 @@ class CodexAppServerConnection:
         return {
             "clientInfo": {
                 "name": "codex_switch",
-                "title": "Codex Switch",
+                "title": "codex switch",
                 "version": "0.1.0",
             },
             "capabilities": {

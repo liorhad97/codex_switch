@@ -255,6 +255,11 @@ code {
   background: rgba(111, 208, 174, 0.18);
 }
 
+.relay-pill-free {
+  background: rgba(242, 202, 117, 0.12);
+  color: #f6d99b;
+}
+
 .relay-pill-recommended {
   background: rgba(111, 208, 174, 0.1);
   color: #baf0db;
