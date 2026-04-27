@@ -1,10 +1,16 @@
 const { app, BrowserWindow, shell } = require("electron");
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
 
 const BACKEND_URL = process.env.CODEX_SWITCH_URL || "http://127.0.0.1:8765";
 let backendProcess = null;
+
+function getAppIconPath() {
+  const iconPath = path.join(__dirname, "assets", "codex-switch-icon.png");
+  return fs.existsSync(iconPath) ? iconPath : undefined;
+}
 
 function waitForBackend(url, timeoutMs = 15000) {
   const startedAt = Date.now();
@@ -60,6 +66,7 @@ function startBackend() {
 async function createWindow() {
   startBackend();
   await waitForBackend(BACKEND_URL);
+  const icon = getAppIconPath();
 
   const window = new BrowserWindow({
     width: 1320,
@@ -68,6 +75,7 @@ async function createWindow() {
     minHeight: 720,
     backgroundColor: "#071018",
     autoHideMenuBar: true,
+    icon,
     webPreferences: {
       contextIsolation: true,
       sandbox: true
@@ -83,6 +91,10 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  const icon = getAppIconPath();
+  if (icon && process.platform === "darwin" && app.dock) {
+    app.dock.setIcon(icon);
+  }
   await createWindow();
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {

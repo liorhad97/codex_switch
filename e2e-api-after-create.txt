@@ -1,0 +1,40 @@
+[GET] http://localhost:3000/api/health => [200] OK
+[GET] http://localhost:3000/api/health => [200] OK
+[GET] http://localhost:3000/api/health => [200] OK
+[GET] http://localhost:3000/api/health => [200] OK
+[GET] http://localhost:3000/api/health => [200] OK
+[GET] http://localhost:3000/api/health => [200] OK
+[GET] http://localhost:3000/api/health => [200] OK
+[GET] http://localhost:3000/api/health => [200] OK
+[GET] http://localhost:3000/api/health => [200] OK
+[POST] http://localhost:3000/api/generate-project-name => [200] OK
+  Request body: {"prompt":"Create a simple page with 'Hello World' text centered in the middle of the page."}
+[POST] http://localhost:3000/api/projects => [201] Created
+  Request body: {"title":"Hello World Centered Page","prompt":"Create a simple page with 'Hello World' text centered in the middle of the page.","status":"generating","metadata":{"projectSpec":{"appKind":"website","framework":"vite_react"}}}
+[GET] http://localhost:3000/api/connectors => [500] Internal Server Error
+[GET] http://localhost:3000/api/billing/summary => [200] OK
+[GET] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180 => [200] OK
+[POST] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/background-access-token => [200] OK
+[GET] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/workers => [200] OK
+[GET] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/connectors => [500] Internal Server Error
+[GET] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/workspace?intent=preview => [200] OK
+[POST] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/background-access-token => [200] OK
+[GET] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/workers => [200] OK
+[POST] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/chat => [500] Internal Server Error
+  Request body: {"prompt":"Create a simple page with 'Hello World' text centered in the middle of the page.","projectId":"8e9f0d01-8525-4074-b08e-e578ec1c3180","windowId":"window_1776763281596_n5gm7mn"}
+[GET] http://localhost:3000/api/agent-events/8e9f0d01-8525-4074-b08e-e578ec1c3180?cursor=0-0 => [FAILED] net::ERR_ABORTED
+[GET] http://localhost:3000/api/connectors => [500] Internal Server Error
+[POST] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/workspace/ensure
+  Request body: {"intent":"preview"}
+[PATCH] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180 => [200] OK
+  Request body: {"metadata":{"chatWindows":[{"id":"window_1776763281596_n5gm7mn","prompt":"Create a simple page with 'Hello World' text centered in the middle of the page.","messages":[],"isQueued":false,"isStreaming":false,"isComplete":true,"isCanceled":false,"timestamp":"2026-04-21T09:21:21.596Z","thinkingStartTime":1776763281596}],"agentLogStreamCursor":"0-0"}}
+[GET] http://localhost:3000/api/agent-events/8e9f0d01-8525-4074-b08e-e578ec1c3180?cursor=0-0 => [FAILED] net::ERR_ABORTED
+[GET] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/workspace?intent=preview => [200] OK
+[GET] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/connectors => [500] Internal Server Error
+[GET] http://localhost:3000/api/connectors => [500] Internal Server Error
+[GET] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/connectors => [500] Internal Server Error
+[GET] http://localhost:3000/api/connectors => [500] Internal Server Error
+[GET] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/connectors => [500] Internal Server Error
+[GET] http://localhost:3000/api/connectors => [500] Internal Server Error
+[GET] http://localhost:3000/api/projects/8e9f0d01-8525-4074-b08e-e578ec1c3180/connectors => [500] Internal Server Error
+[GET] http://localhost:3000/api/health => [200] OK

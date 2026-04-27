@@ -83,6 +83,63 @@ function hasUsageData(account) {
   return Boolean(account?.rate_limits?.primary || account?.rate_limits?.secondary);
 }
 
+function getRemainingFraction(window) {
+  const remaining = remainingPercentValue(window?.usedPercent);
+  if (remaining === null) {
+    return null;
+  }
+  return remaining / 100;
+}
+
+function calculateAccountUsageCost(account) {
+  const hourlyRemaining = getRemainingFraction(account?.rate_limits?.primary);
+  const weeklyRemaining = getRemainingFraction(account?.rate_limits?.secondary);
+  const knownWindows = [hourlyRemaining, weeklyRemaining].filter((value) => typeof value === "number");
+  const hasHourly = typeof hourlyRemaining === "number";
+  const hasWeekly = typeof weeklyRemaining === "number";
+
+  if (!account?.enabled || account?.oauth || knownWindows.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const minRemaining = Math.min(...knownWindows);
+  const weightedRemaining =
+    (hasHourly ? hourlyRemaining * 0.68 : 0) +
+    (hasWeekly ? weeklyRemaining * 0.32 : 0);
+  const balanceGap = hasHourly && hasWeekly ? Math.abs(hourlyRemaining - weeklyRemaining) : 1;
+  const missingWindowPenalty = (2 - knownWindows.length) * 1.8;
+  const bottleneckPenalty = 3.4 / (minRemaining + 0.03);
+  const headroomPenalty = 1.8 / (weightedRemaining + 0.05);
+  const imbalancePenalty = balanceGap * 1.9;
+  const hourlyLowPenalty = hasHourly ? 1.35 / (hourlyRemaining + 0.08) : 1.9;
+  const weeklyLowPenalty = hasWeekly ? 0.75 / (weeklyRemaining + 0.05) : 1.4;
+
+  return (
+    missingWindowPenalty +
+    bottleneckPenalty +
+    headroomPenalty +
+    imbalancePenalty +
+    hourlyLowPenalty +
+    weeklyLowPenalty
+  );
+}
+
+function getRecommendedAccount(accounts) {
+  return (accounts || []).reduce((bestAccount, candidate) => {
+    const candidateCost = calculateAccountUsageCost(candidate);
+    if (!Number.isFinite(candidateCost)) {
+      return bestAccount;
+    }
+
+    if (!bestAccount) {
+      return candidate;
+    }
+
+    const bestCost = calculateAccountUsageCost(bestAccount);
+    return candidateCost < bestCost ? candidate : bestAccount;
+  }, null);
+}
+
 function getOauthUrl(flow) {
   return flow?.settings_url || flow?.verification_uri || flow?.help_url || null;
 }
@@ -154,7 +211,7 @@ function SignInPanel({ flow, onOpen, onCancel, cancelBusy = false }) {
   );
 }
 
-function AccountCard({ account, selected, onSelect }) {
+function AccountCard({ account, selected, recommended, onSelect }) {
   return (
     <button
       type="button"
@@ -167,6 +224,7 @@ function AccountCard({ account, selected, onSelect }) {
           <div className="relay-account-title-row">
             <h3 className="relay-account-title">{account.title}</h3>
             {account.app_primary ? <span className="relay-pill relay-pill-primary">Primary</span> : null}
+            {recommended ? <span className="relay-pill relay-pill-recommended">Recommended</span> : null}
           </div>
           <p className="relay-account-copy">{buildUsageSummary(account)}</p>
         </div>
@@ -241,6 +299,7 @@ function App() {
   const pendingOAuthFlow = state?.pending_oauth_flow || null;
   const selectedAccount =
     accounts.find((account) => account.id === state?.selected_account_id) || accounts[0] || null;
+  const recommendedAccount = getRecommendedAccount(accounts);
   const selectedHasUsage = hasUsageData(selectedAccount);
   const selectedOauthFlow = selectedAccount?.oauth || null;
   const selectedOauthUrl = getOauthUrl(selectedOauthFlow);
@@ -320,6 +379,20 @@ function App() {
     );
   };
 
+  const selectRecommendedAccount = async () => {
+    if (!recommendedAccount) {
+      setFeedback("No account has enough usage data yet to recommend one.");
+      return;
+    }
+
+    try {
+      await selectAccount(recommendedAccount.id);
+      setFeedback(`Selected ${recommendedAccount.title} as the best balanced account for current usage.`);
+    } catch {
+      // Error is already surfaced in state.
+    }
+  };
+
   const importAccounts = async () => {
     await runAction("import", () => request("/api/import", { method: "POST" }));
   };
@@ -380,19 +453,51 @@ function App() {
     }
   };
 
-  const openSelectedAccount = async () => {
+  const removeSelectedAccount = async () => {
     if (!selectedAccount) return;
+    const confirmed = window.confirm(
+      `Remove ${selectedAccount.title}? This deletes its managed profile folder and removes it from Codex Switch.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
     try {
-      await runAction(`launch:${selectedAccount.id}`, () =>
-        request(`/api/accounts/${selectedAccount.id}/launch`, { method: "POST" })
+      await runAction(`remove:${selectedAccount.id}`, () =>
+        request(`/api/accounts/${selectedAccount.id}`, { method: "DELETE" })
       );
-      setFeedback(`Set ${selectedAccount.title} as primary and opened Codex.`);
+      setFeedback(`${selectedAccount.title} was removed.`);
     } catch {
       // Error is already surfaced in state.
     }
   };
 
-  const openBusy = busyKey === `launch:${selectedAccount?.id}`;
+  const openSelectedAccountInCodexDesktop = async () => {
+    if (!selectedAccount) return;
+    try {
+      await runAction(`launch-desktop:${selectedAccount.id}`, () =>
+        request(`/api/accounts/${selectedAccount.id}/launch`, { method: "POST" })
+      );
+      setFeedback(`Set ${selectedAccount.title} as primary and opened Codex Desktop.`);
+    } catch {
+      // Error is already surfaced in state.
+    }
+  };
+
+  const setSelectedAccountForVSCode = async () => {
+    if (!selectedAccount) return;
+    try {
+      await runAction(`launch-vscode:${selectedAccount.id}`, () =>
+        request(`/api/accounts/${selectedAccount.id}/launch-vscode`, { method: "POST" })
+      );
+      setFeedback(`Set ${selectedAccount.title} for Codex VS Code and reopened the extension.`);
+    } catch {
+      // Error is already surfaced in state.
+    }
+  };
+
+  const codexDesktopBusy = busyKey === `launch-desktop:${selectedAccount?.id}`;
+  const vscodeBusy = busyKey === `launch-vscode:${selectedAccount?.id}`;
 
   return (
     <div className="app-frame" aria-busy={loading}>
@@ -424,6 +529,14 @@ function App() {
               >
                 {busyKey === "import" ? "Refreshing..." : "Refresh"}
               </button>
+              <button
+                type="button"
+                className="relay-header-button relay-header-button-recommended"
+                onClick={selectRecommendedAccount}
+                disabled={!recommendedAccount || busyKey === `select:${recommendedAccount?.id}`}
+              >
+                {busyKey === `select:${recommendedAccount?.id}` ? "Choosing..." : "Pick Best"}
+              </button>
             </div>
           </div>
 
@@ -449,6 +562,7 @@ function App() {
                   key={account.id}
                   account={account}
                   selected={selectedAccount?.id === account.id}
+                  recommended={recommendedAccount?.id === account.id}
                   onSelect={selectAccount}
                 />
               ))}
@@ -493,7 +607,7 @@ function App() {
               ) : !selectedOauthFlow ? (
                 <section className="relay-usage-stat relay-usage-stat-full">
                   <p className="relay-usage-stat-label">Usage</p>
-                  <p className="relay-empty-copy">Checking usage. If it stays empty, open the account in Codex.</p>
+                  <p className="relay-empty-copy">Checking usage. If it stays empty, open the account in Codex Desktop or Codex VS Code.</p>
                 </section>
               ) : null}
 
@@ -521,14 +635,24 @@ function App() {
                     Open Sign-In Link
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    className="relay-account-action relay-account-action-primary"
-                    onClick={openSelectedAccount}
-                    disabled={openBusy}
-                  >
-                    {openBusy ? "Opening..." : "Open in Codex"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="relay-account-action relay-account-action-primary"
+                      onClick={openSelectedAccountInCodexDesktop}
+                      disabled={codexDesktopBusy}
+                    >
+                      {codexDesktopBusy ? "Opening..." : "Open in Codex Desktop"}
+                    </button>
+                    <button
+                      type="button"
+                      className="relay-account-action"
+                      onClick={setSelectedAccountForVSCode}
+                      disabled={vscodeBusy}
+                    >
+                      {vscodeBusy ? "Setting..." : "Open in Codex VS Code"}
+                    </button>
+                  </>
                 )}
                 {!selectedOauthFlow && !selectedHasUsage && selectedAccount.source?.startsWith("local_") ? (
                   <button
@@ -540,6 +664,14 @@ function App() {
                     {busyKey === `connect:${selectedAccount.id}` ? "Starting..." : "Start Sign-In"}
                   </button>
                 ) : null}
+                <button
+                  type="button"
+                  className="relay-account-action relay-account-action-danger"
+                  onClick={removeSelectedAccount}
+                  disabled={busyKey === `remove:${selectedAccount.id}`}
+                >
+                  {busyKey === `remove:${selectedAccount.id}` ? "Removing..." : "Remove Account"}
+                </button>
               </div>
             </>
           ) : (

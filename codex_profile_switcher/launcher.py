@@ -8,8 +8,11 @@ from pathlib import Path
 
 DEFAULT_CODEX_APP_PATH = Path("/Applications/Codex.app")
 DEFAULT_CODEX_USER_DATA_DIR = Path.home() / "Library" / "Application Support" / "Codex"
+CODEX_VSCODE_URI = "vscode://openai.chatgpt/"
+VSCODE_BUNDLE_ID = "com.microsoft.VSCode"
 CODEX_TERMINATION_TIMEOUT_SECONDS = 5.0
 CODEX_TERMINATION_POLL_INTERVAL_SECONDS = 0.1
+VSCODE_TERMINATION_TIMEOUT_SECONDS = 8.0
 
 
 def _is_same_or_nested(path: Path, other: Path) -> bool:
@@ -68,6 +71,16 @@ def running_codex_pids(codex_app_path: Path) -> list[int]:
     return [pid for pid, command in _read_process_listing() if _matches_codex_executable(command, executable)]
 
 
+def _matches_vscode_main_process(command: str) -> bool:
+    if "/Visual Studio Code" not in command or "/Contents/Frameworks/" in command:
+        return False
+    return command.endswith(".app/Contents/MacOS/Code") or ".app/Contents/MacOS/Code " in command
+
+
+def running_vscode_pids() -> list[int]:
+    return [pid for pid, command in _read_process_listing() if _matches_vscode_main_process(command)]
+
+
 def is_default_codex_running() -> bool:
     default_dir = str(DEFAULT_CODEX_USER_DATA_DIR.expanduser().resolve())
     executable = str(codex_executable_path(DEFAULT_CODEX_APP_PATH))
@@ -84,6 +97,19 @@ def _wait_for_codex_exit(codex_app_path: Path, pids: set[int], timeout_seconds: 
     remaining = set(pids)
     while remaining:
         remaining &= set(running_codex_pids(codex_app_path))
+        if not remaining:
+            return set()
+        if time.monotonic() >= deadline:
+            return remaining
+        time.sleep(CODEX_TERMINATION_POLL_INTERVAL_SECONDS)
+    return set()
+
+
+def _wait_for_vscode_exit(pids: set[int], timeout_seconds: float) -> set[int]:
+    deadline = time.monotonic() + max(timeout_seconds, 0.0)
+    remaining = set(pids)
+    while remaining:
+        remaining &= set(running_vscode_pids())
         if not remaining:
             return set()
         if time.monotonic() >= deadline:
@@ -121,6 +147,49 @@ def terminate_running_codex(
     return True
 
 
+def terminate_running_vscode(
+    *,
+    timeout_seconds: float = VSCODE_TERMINATION_TIMEOUT_SECONDS,
+) -> bool:
+    pids = set(running_vscode_pids())
+    if not pids:
+        return False
+
+    try:
+        subprocess.run(
+            ["osascript", "-e", f'tell application id "{VSCODE_BUNDLE_ID}" to quit'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=min(max(timeout_seconds, 0.5), 5.0),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    stubborn_pids = _wait_for_vscode_exit(pids, timeout_seconds)
+    if not stubborn_pids:
+        return True
+
+    for pid in stubborn_pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            continue
+
+    stubborn_pids = _wait_for_vscode_exit(stubborn_pids, CODEX_TERMINATION_TIMEOUT_SECONDS)
+    if not stubborn_pids:
+        return True
+
+    for pid in stubborn_pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            continue
+
+    _wait_for_vscode_exit(stubborn_pids, CODEX_TERMINATION_TIMEOUT_SECONDS)
+    return True
+
+
 def build_codex_launch_command(
     codex_app_path: Path,
     user_data_dir: Path | None = None,
@@ -142,6 +211,20 @@ def launch_codex(
     subprocess.Popen(
         [str(executable)],
         env=codex_launch_env(),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def build_codex_vscode_extension_command() -> list[str]:
+    return ["open", CODEX_VSCODE_URI]
+
+
+def launch_codex_vscode_extension() -> None:
+    terminate_running_vscode()
+    subprocess.Popen(
+        build_codex_vscode_extension_command(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,

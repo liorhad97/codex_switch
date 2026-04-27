@@ -330,6 +330,35 @@ class ProfileStore:
         self.save_config(updated)
         return updated
 
+    def remove_account(self, account_id: str) -> SwitcherConfig:
+        accounts = self._read_accounts_snapshot()
+        account = next((entry for entry in accounts if entry.id == account_id), None)
+        if account is None:
+            raise ValueError(f"Unknown account: {account_id}")
+
+        remaining_accounts = [entry for entry in accounts if entry.id != account_id]
+        self._write_accounts_snapshot(remaining_accounts)
+
+        config = self.load_config()
+        launch_profiles = dict(config.launch_profiles)
+        launch_profiles.pop(account_id, None)
+        updated = SwitcherConfig(
+            primary_account_id=None if config.primary_account_id == account_id else config.primary_account_id,
+            last_selected_account_id=None
+            if config.last_selected_account_id == account_id
+            else config.last_selected_account_id,
+            codex_app_path=config.codex_app_path,
+            launch_profiles=launch_profiles,
+        )
+        self.save_config(updated)
+
+        profile_root = account.profile_root.expanduser().resolve()
+        prepared_profiles_root = self.paths.prepared_profiles_root.expanduser().resolve()
+        if self._is_within(profile_root, prepared_profiles_root) and profile_root.exists():
+            shutil.rmtree(profile_root, ignore_errors=True)
+
+        return updated
+
     def set_codex_app_path(self, config: SwitcherConfig, codex_app_path: Path) -> SwitcherConfig:
         updated = SwitcherConfig(
             primary_account_id=config.primary_account_id,

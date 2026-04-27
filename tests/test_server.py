@@ -78,6 +78,10 @@ class FakeOAuthManager:
             )
         return True
 
+    def close(self, account_id: str) -> None:
+        self.cancelled_account_ids.append(account_id)
+        self.live_by_account_id.pop(account_id, None)
+
     def close_all(self) -> None:
         return None
 
@@ -225,6 +229,27 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertTrue(oauth_manager.cancelled_pending)
         self.assertIsNone(payload["pending_oauth_flow"])
 
+    def test_remove_account_clears_selection_and_deletes_profile(self) -> None:
+        account, _config = self.store.add_local_account("Local alpha")
+        oauth_manager = FakeOAuthManager(store=self.store)
+        server = SwitcherServer(
+            ("127.0.0.1", 0),
+            static_root=self.static_root,
+            store=self.store,
+            oauth_manager=oauth_manager,
+        )
+        try:
+            server.set_selected(account.id)
+            server.remove_account(account.id)
+            payload = server.build_state()
+        finally:
+            server.server_close()
+
+        self.assertEqual(payload["accounts"], [])
+        self.assertIsNone(payload["selected_account_id"])
+        self.assertIn(account.id, oauth_manager.cancelled_account_ids)
+        self.assertFalse(account.profile_root.exists())
+
     def test_build_state_uses_local_oauth_manager_state_for_local_accounts(self) -> None:
         self.store.persist_local_oauth_account(
             account_id="local-1",
@@ -338,6 +363,37 @@ class SwitcherServerTests(unittest.TestCase):
         launch_codex.assert_called_once()
         self.assertEqual(build_command.call_args.args, (self.store.load_config().codex_app_path,))
         self.assertEqual(launch_codex.call_args.args, (self.store.load_config().codex_app_path,))
+        self.assertEqual(server.store.load_config().primary_account_id, "local-1")
+
+    def test_set_account_for_codex_vscode_sets_primary_and_opens_extension_uri(self) -> None:
+        self.store.persist_local_oauth_account(
+            account_id="local-1",
+            label="local@example.com",
+            home_dir=self.paths.prepared_profiles_root / "local-1" / "home",
+            auth_mode="chatgpt_oauth",
+        )
+        self._write_auth(self.paths.prepared_profiles_root / "local-1" / "home")
+        server = SwitcherServer(
+            ("127.0.0.1", 0),
+            static_root=self.static_root,
+            store=self.store,
+            oauth_manager=FakeOAuthManager(),
+        )
+        try:
+            with (
+                patch(
+                    "codex_profile_switcher.server.build_codex_vscode_extension_command",
+                    return_value=["open", "vscode://openai.chatgpt/"],
+                ) as build_command,
+                patch("codex_profile_switcher.server.launch_codex_vscode_extension") as launch_extension,
+            ):
+                command = server.set_account_for_codex_vscode("local-1")
+        finally:
+            server.server_close()
+
+        self.assertEqual(command, ["open", "vscode://openai.chatgpt/"])
+        build_command.assert_called_once_with()
+        launch_extension.assert_called_once_with()
         self.assertEqual(server.store.load_config().primary_account_id, "local-1")
 
     def _write_auth(self, home_dir: Path) -> Path:

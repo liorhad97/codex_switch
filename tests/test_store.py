@@ -164,6 +164,20 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(config.primary_account_id, "oauth-local-1")
         self.assertEqual(config.launch_profiles["oauth-local-1"], account.profile_root.resolve())
 
+    def test_remove_account_deletes_snapshot_profile_and_config_links(self) -> None:
+        account, _config = self.store.add_local_account("Local alpha")
+
+        updated_config = self.store.remove_account(account.id)
+
+        accounts, config = self.store.load_accounts()
+        self.assertEqual(accounts, [])
+        self.assertFalse(account.profile_root.exists())
+        self.assertIsNone(updated_config.primary_account_id)
+        self.assertIsNone(updated_config.last_selected_account_id)
+        self.assertNotIn(account.id, updated_config.launch_profiles)
+        self.assertIsNone(config.primary_account_id)
+        self.assertIsNone(config.last_selected_account_id)
+
     def test_load_accounts_drops_snapshot_accounts_outside_managed_profiles_root(self) -> None:
         legacy_home = self.root / "flutty_orc_data" / "profiles" / "alpha" / "home"
         self._write_auth(legacy_home, "legacy-token")

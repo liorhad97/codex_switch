@@ -8,13 +8,18 @@ from unittest.mock import call, patch
 from codex_profile_switcher.launcher import (
     DEFAULT_CODEX_APP_PATH,
     DEFAULT_CODEX_USER_DATA_DIR,
+    CODEX_VSCODE_URI,
     build_codex_launch_command,
+    build_codex_vscode_extension_command,
     codex_executable_path,
     codex_launch_env,
     is_default_codex_running,
     is_safe_codex_user_data_dir,
     launch_codex,
+    launch_codex_vscode_extension,
+    running_vscode_pids,
     running_codex_pids,
+    terminate_running_vscode,
     terminate_running_codex,
 )
 
@@ -23,6 +28,10 @@ class LauncherTests(unittest.TestCase):
     def test_build_command_launches_codex_normally(self) -> None:
         command = build_codex_launch_command(DEFAULT_CODEX_APP_PATH)
         self.assertEqual(command, [str(codex_executable_path(DEFAULT_CODEX_APP_PATH))])
+
+    def test_build_codex_vscode_extension_command_opens_codex_extension_uri(self) -> None:
+        command = build_codex_vscode_extension_command()
+        self.assertEqual(command, ["open", CODEX_VSCODE_URI])
 
     def test_default_codex_profile_is_rejected(self) -> None:
         self.assertFalse(is_safe_codex_user_data_dir(DEFAULT_CODEX_USER_DATA_DIR))
@@ -51,6 +60,15 @@ class LauncherTests(unittest.TestCase):
         process_listing = f"123 {executable}\n456 /bin/bash\n"
         with patch("subprocess.check_output", return_value=process_listing):
             self.assertEqual(running_codex_pids(DEFAULT_CODEX_APP_PATH), [123])
+
+    def test_running_vscode_pids_detects_main_code_process(self) -> None:
+        process_listing = (
+            "123 /Applications/Visual Studio Code.app/Contents/MacOS/Code\n"
+            "456 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper\n"
+            "789 /bin/bash\n"
+        )
+        with patch("subprocess.check_output", return_value=process_listing):
+            self.assertEqual(running_vscode_pids(), [123])
 
     def test_terminate_running_codex_sends_sigterm(self) -> None:
         with (
@@ -88,6 +106,30 @@ class LauncherTests(unittest.TestCase):
         terminate_running.assert_called_once_with(DEFAULT_CODEX_APP_PATH)
         popen.assert_called_once()
         self.assertEqual(popen.call_args.args[0], [str(executable)])
+
+    def test_terminate_running_vscode_quits_then_sigterms_stubborn_process(self) -> None:
+        with (
+            patch("codex_profile_switcher.launcher.running_vscode_pids", return_value=[123]),
+            patch("codex_profile_switcher.launcher._wait_for_vscode_exit", side_effect=[{123}, set()]) as wait_for_exit,
+            patch("subprocess.run") as run,
+            patch("os.kill") as kill,
+        ):
+            self.assertTrue(terminate_running_vscode())
+
+        run.assert_called_once()
+        kill.assert_called_once_with(123, signal.SIGTERM)
+        self.assertEqual(wait_for_exit.call_count, 2)
+
+    def test_launch_codex_vscode_extension_restarts_vscode_and_opens_extension_uri(self) -> None:
+        with (
+            patch("codex_profile_switcher.launcher.terminate_running_vscode") as terminate_vscode,
+            patch("subprocess.Popen") as popen,
+        ):
+            launch_codex_vscode_extension()
+
+        terminate_vscode.assert_called_once_with()
+        popen.assert_called_once()
+        self.assertEqual(popen.call_args.args[0], ["open", CODEX_VSCODE_URI])
 
 
 if __name__ == "__main__":

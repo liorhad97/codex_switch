@@ -1,0 +1,9 @@
+Total messages: 7 (Errors: 0, Warnings: 0)
+
+[INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/8283b_next_dist_1e56481c._.js:2297
+[LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/8283b_next_dist_1e56481c._.js:2297
+[LOG] [ConnectionMonitor] Starting network monitoring @ http://localhost:3000/_next/static/chunks/8283b_next_dist_1e56481c._.js:2297
+[LOG] [NetworkStateManager] State transition: online → checking @ http://localhost:3000/_next/static/chunks/8283b_next_dist_1e56481c._.js:2297
+[LOG] [NetworkStateManager] State transition: checking → online @ http://localhost:3000/_next/static/chunks/8283b_next_dist_1e56481c._.js:2297
+[LOG] [setPreviewUrl] Updating preview URL: {from: null, to: https://preview-755eb3df-4de4-442e-877a-66ae1d24e2bd.flutty.dev, stack:     at basicStateReducer (http://localhost:3000/_n…xt_dist_compiled_react-dom_31dd9fc7._.js:4860:16)} @ http://localhost:3000/_next/static/chunks/8283b_next_dist_1e56481c._.js:2297
+[LOG] [setPreviewUrl] Updating preview URL: {from: null, to: https://preview-755eb3df-4de4-442e-877a-66ae1d24e2bd.flutty.dev, stack:     at basicStateReducer (http://localhost:3000/_n…xt_dist_compiled_react-dom_31dd9fc7._.js:4860:16)} @ http://localhost:3000/_next/static/chunks/8283b_next_dist_1e56481c._.js:2297

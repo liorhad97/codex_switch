@@ -16,7 +16,12 @@ from urllib import error as urllib_error
 from urllib.parse import parse_qs, urlsplit
 from urllib import request as urllib_request
 
-from .launcher import build_codex_launch_command, launch_codex
+from .launcher import (
+    build_codex_launch_command,
+    build_codex_vscode_extension_command,
+    launch_codex,
+    launch_codex_vscode_extension,
+)
 from .models import AccountRecord
 from .oauth import AccountOAuthManager
 from .profile_home import codex_home_path
@@ -150,6 +155,18 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
             self._send_json(response)
             return
 
+        account_match = re.fullmatch(r"/api/accounts/([^/]+)/launch-vscode", self.path)
+        if account_match:
+            try:
+                command = self.switcher.set_account_for_codex_vscode(account_match.group(1))
+            except ValueError as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            response = self.switcher.build_state()
+            response.update({"ok": True, "command": command})
+            self._send_json(response)
+            return
+
         account_match = re.fullmatch(r"/api/accounts/([^/]+)/connect", self.path)
         if account_match:
             try:
@@ -176,6 +193,15 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
         self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
 
     def do_DELETE(self) -> None:  # noqa: N802
+        account_match = re.fullmatch(r"/api/accounts/([^/]+)", self.path)
+        if account_match:
+            try:
+                self.switcher.remove_account(account_match.group(1))
+            except ValueError as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(self.switcher.build_state())
+            return
         account_match = re.fullmatch(r"/api/accounts/([^/]+)/launch-profile", self.path)
         if account_match:
             self.switcher.clear_launch_profile(account_match.group(1))
@@ -385,12 +411,28 @@ class SwitcherServer(ThreadingHTTPServer):
         self.store.clear_launch_profile(config, account_id)
         self._selected_account_id = account_id
 
+    def remove_account(self, account_id: str) -> None:
+        _find_account(self.store.load_accounts()[0], account_id)
+        self.oauth.close(account_id)
+        self.store.remove_account(account_id)
+        if self._selected_account_id == account_id:
+            self._selected_account_id = None
+
     def launch_account(self, account_id: str) -> list[str]:
         accounts, config = self.store.load_accounts()
         _find_account(accounts, account_id)
         updated_config = self.store.set_primary(config, account_id)
         command = build_codex_launch_command(updated_config.codex_app_path)
         launch_codex(updated_config.codex_app_path)
+        self._selected_account_id = account_id
+        return command
+
+    def set_account_for_codex_vscode(self, account_id: str) -> list[str]:
+        accounts, config = self.store.load_accounts()
+        _find_account(accounts, account_id)
+        self.store.set_primary(config, account_id)
+        command = build_codex_vscode_extension_command()
+        launch_codex_vscode_extension()
         self._selected_account_id = account_id
         return command
 

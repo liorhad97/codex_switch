@@ -140,9 +140,23 @@ code {
   font-weight: 700;
 }
 
+.relay-header-button-recommended {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
 .relay-header-button-primary:hover,
 .relay-account-action-primary:hover {
   background: var(--accent-strong);
+}
+
+.relay-account-action-danger {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--border));
+  color: var(--danger);
+}
+
+.relay-account-action-danger:hover {
+  border-color: color-mix(in srgb, var(--danger) 58%, var(--border));
+  background: rgba(255, 143, 150, 0.08);
 }
 
 .relay-header-button:disabled,
@@ -239,6 +253,11 @@ code {
 
 .relay-pill-primary {
   background: rgba(111, 208, 174, 0.18);
+}
+
+.relay-pill-recommended {
+  background: rgba(111, 208, 174, 0.1);
+  color: #baf0db;
 }
 
 .relay-account-error {
