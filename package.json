@@ -10,9 +10,9 @@
     "build:backend": "node scripts/build-backend.cjs",
     "backend": "python3 -m codex_profile_switcher.server --static-root ./web/dist",
     "electron": "npm run web:build && electron electron/main.cjs",
-    "dist": "npm run web:build && npm run build:backend && electron-builder",
-    "dist:mac": "npm run web:build && npm run build:backend && electron-builder --mac",
-    "dist:win": "npm run web:build && npm run build:backend && electron-builder --win",
+    "dist": "npm run web:build && npm run build:backend && electron-builder --publish never",
+    "dist:mac": "npm run web:build && npm run build:backend && electron-builder --mac --publish never",
+    "dist:win": "npm run web:build && npm run build:backend && electron-builder --win --publish never",
     "test:web-build": "vite build"
   },
   "build": {
