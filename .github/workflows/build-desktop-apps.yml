@@ -64,15 +64,22 @@ jobs:
           npm ci
           python -m pip install --upgrade pip pyinstaller
 
-      - name: Require macOS signing certificate
+      - name: Require macOS production signing and notarization secrets
         if: runner.os == 'macOS'
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
         run: |
           if [[ -z "${CSC_LINK}" || -z "${CSC_KEY_PASSWORD}" ]]; then
-            echo "::error::macOS updater releases must be signed with a stable certificate. Set repository secrets CSC_LINK and CSC_KEY_PASSWORD before publishing updates."
+            echo "::error::macOS releases must be signed with an Apple Developer ID Application certificate. Set CSC_LINK and CSC_KEY_PASSWORD to a Developer ID Application .p12 before publishing updates."
+            exit 1
+          fi
+          if [[ -z "${APPLE_ID}" || -z "${APPLE_APP_SPECIFIC_PASSWORD}" || -z "${APPLE_TEAM_ID}" ]]; then
+            echo "::error::macOS releases must be notarized by Apple. Set APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID before publishing updates."
             exit 1
           fi
 
@@ -147,9 +154,13 @@ jobs:
             VALID_IDENTITY_COUNT="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | awk '/valid identities found/{print $1}')"
           fi
 
-          security find-identity -v -p codesigning "${KEYCHAIN_PATH}"
+          security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | tee "${RUNNER_TEMP}/codesign-identities.txt"
           if [[ "${VALID_IDENTITY_COUNT:-0}" == "0" ]]; then
-            echo "::error::CSC_LINK was imported, but no valid macOS code-signing identity was found. Use an Apple Developer ID Application certificate or a trusted self-signed code-signing certificate."
+            echo "::error::CSC_LINK was imported, but no valid macOS code-signing identity was found. Use an Apple Developer ID Application certificate."
+            exit 1
+          fi
+          if ! grep -q "Developer ID Application:" "${RUNNER_TEMP}/codesign-identities.txt"; then
+            echo "::error::CSC_LINK is not an Apple Developer ID Application certificate. Self-signed certificates cannot be notarized and will trigger Apple's malware verification warning."
             exit 1
           fi
 
@@ -203,6 +214,17 @@ jobs:
             echo "::error::Packaged macOS app is still ad-hoc signed. Refusing to publish an updater build that ShipIt cannot validate."
             exit 1
           fi
+          if ! grep -q "Authority=Developer ID Application:" <<<"${SIGNATURE_DETAILS}"; then
+            echo "::error::Packaged macOS app is not signed with an Apple Developer ID Application certificate."
+            exit 1
+          fi
+          if grep -q "TeamIdentifier=not set" <<<"${SIGNATURE_DETAILS}"; then
+            echo "::error::Packaged macOS app has no Apple TeamIdentifier, so Gatekeeper cannot verify it."
+            exit 1
+          fi
+
+          xcrun stapler validate "${APP_PATH}"
+          spctl --assess --type execute --verbose=4 "${APP_PATH}"
 
       - name: Build Windows app
         if: runner.os == 'Windows'
