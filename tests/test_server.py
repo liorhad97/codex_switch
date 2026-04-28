@@ -523,6 +523,7 @@ class SwitcherServerTests(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {"CODEX_BINARY": ""}, clear=False),
+            patch("codex_profile_switcher.server._is_windows", return_value=False),
             patch("codex_profile_switcher.server.shutil.which", return_value=None),
         ):
             self.assertEqual(_resolve_codex_binary(self.store), str(binary_path.resolve()))

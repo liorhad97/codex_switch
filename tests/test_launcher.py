@@ -52,23 +52,22 @@ class LauncherTests(unittest.TestCase):
 
     def test_detects_running_default_codex_instance(self) -> None:
         executable = codex_executable_path(DEFAULT_CODEX_APP_PATH)
-        process_listing = f"123 {executable}\n"
-        with patch("subprocess.check_output", return_value=process_listing):
+        with patch("codex_profile_switcher.launcher._read_process_listing", return_value=[(123, str(executable))]):
             self.assertTrue(is_default_codex_running())
 
     def test_running_codex_pids_detects_matching_process(self) -> None:
         executable = codex_executable_path(DEFAULT_CODEX_APP_PATH)
-        process_listing = f"123 {executable}\n456 /bin/bash\n"
-        with patch("subprocess.check_output", return_value=process_listing):
+        process_listing = [(123, str(executable)), (456, "/bin/bash")]
+        with patch("codex_profile_switcher.launcher._read_process_listing", return_value=process_listing):
             self.assertEqual(running_codex_pids(DEFAULT_CODEX_APP_PATH), [123])
 
     def test_running_vscode_pids_detects_main_code_process(self) -> None:
-        process_listing = (
-            "123 /Applications/Visual Studio Code.app/Contents/MacOS/Code\n"
-            "456 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper\n"
-            "789 /bin/bash\n"
-        )
-        with patch("subprocess.check_output", return_value=process_listing):
+        process_listing = [
+            (123, "/Applications/Visual Studio Code.app/Contents/MacOS/Code"),
+            (456, "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper"),
+            (789, "/bin/bash"),
+        ]
+        with patch("codex_profile_switcher.launcher._read_process_listing", return_value=process_listing):
             self.assertEqual(running_vscode_pids(), [123])
 
     def test_terminate_running_codex_sends_sigterm(self) -> None:
