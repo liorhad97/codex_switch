@@ -843,12 +843,16 @@ def _terminate_stale_backend_processes(*, current_pid: int, current_port: int) -
     fixed: list[str] = []
     warnings: list[str] = []
     processes = _list_codex_switch_backend_processes()
-    stale_processes = [process for process in processes if process["pid"] != current_pid]
+    protected_process_ids = _current_backend_process_group_ids(processes, current_pid)
+    stale_processes = [process for process in processes if process["pid"] not in protected_process_ids]
 
     checks.append(
         f"Found {len(processes)} codex switch backend process"
         f"{'' if len(processes) == 1 else 'es'}."
     )
+    if len(protected_process_ids) > 1:
+        protected_label = ", ".join(str(pid) for pid in sorted(protected_process_ids))
+        checks.append(f"Protected current packaged backend process group: {protected_label}.")
 
     for process in stale_processes:
         pid = int(process["pid"])
@@ -863,6 +867,41 @@ def _terminate_stale_backend_processes(*, current_pid: int, current_port: int) -
     if not stale_processes:
         checks.append(f"No stale backend process was found beside current port {current_port}.")
     return {"checks": checks, "fixed": fixed, "warnings": warnings}
+
+
+def _current_backend_process_group_ids(processes: list[dict[str, Any]], current_pid: int) -> set[int]:
+    parent_by_pid: dict[int, int] = {}
+    children_by_parent_pid: dict[int, set[int]] = {}
+    for process in processes:
+        pid = _int_value(process.get("pid"))
+        ppid = _int_value(process.get("ppid"))
+        if pid is None or ppid is None:
+            continue
+        parent_by_pid[pid] = ppid
+        children_by_parent_pid.setdefault(ppid, set()).add(pid)
+
+    protected = {current_pid}
+
+    pid = current_pid
+    seen: set[int] = set()
+    while pid not in seen:
+        seen.add(pid)
+        parent_pid = parent_by_pid.get(pid)
+        if parent_pid is None or parent_pid not in parent_by_pid:
+            break
+        protected.add(parent_pid)
+        pid = parent_pid
+
+    pending = list(protected)
+    while pending:
+        parent_pid = pending.pop()
+        for child_pid in children_by_parent_pid.get(parent_pid, set()):
+            if child_pid in protected:
+                continue
+            protected.add(child_pid)
+            pending.append(child_pid)
+
+    return protected
 
 
 def _terminate_process_tree(pid: int) -> None:

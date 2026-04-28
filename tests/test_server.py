@@ -17,6 +17,7 @@ from codex_profile_switcher.server import (
     _FLUTTY_LIVE_STATE_CACHE,
     _list_codex_switch_backend_processes,
     _resolve_codex_binary,
+    _terminate_stale_backend_processes,
 )
 from codex_profile_switcher.store import AppPaths, ProfileStore
 
@@ -406,6 +407,31 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertIn(f"Stopped stale backend process {stale_pid} on port 8765.", payload["fixed"])
         self.assertFalse(skeleton_root.exists())
         self.assertEqual(payload["state"]["accounts"][0]["id"], "alpha")
+
+    def test_stale_backend_cleanup_protects_packaged_backend_wrapper_process(self) -> None:
+        current_pid = os.getpid()
+        wrapper_pid = current_pid + 1000
+        stale_pid = current_pid + 2000
+
+        with (
+            patch(
+                "codex_profile_switcher.server._list_codex_switch_backend_processes",
+                return_value=[
+                    {"pid": wrapper_pid, "ppid": 1, "command": "codex-switch-backend.exe", "port": 18765},
+                    {"pid": current_pid, "ppid": wrapper_pid, "command": "codex-switch-backend.exe", "port": 18765},
+                    {"pid": stale_pid, "ppid": 1, "command": "codex-switch-backend.exe", "port": 8765},
+                ],
+            ),
+            patch("codex_profile_switcher.server._terminate_process_tree") as terminate_process,
+        ):
+            payload = _terminate_stale_backend_processes(current_pid=current_pid, current_port=18765)
+
+        terminate_process.assert_called_once_with(stale_pid)
+        self.assertIn(
+            f"Protected current packaged backend process group: {current_pid}, {wrapper_pid}.",
+            payload["checks"],
+        )
+        self.assertIn(f"Stopped stale backend process {stale_pid} on port 8765.", payload["fixed"])
 
     def test_cancel_account_sign_in_marks_local_account_disconnected(self) -> None:
         self.store.persist_local_oauth_account(
