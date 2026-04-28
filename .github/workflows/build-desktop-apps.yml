@@ -215,6 +215,7 @@ jobs:
 
       - name: Smoke test Windows Electron UI from zip
         if: runner.os == 'Windows'
+        timeout-minutes: 4
         run: node scripts/windows-electron-ui-smoke.cjs
 
       - name: Upload installer artifacts
