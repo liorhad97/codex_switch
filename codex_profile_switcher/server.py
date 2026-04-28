@@ -565,6 +565,8 @@ def _resolve_codex_binary(store: ProfileStore) -> str:
         return path_binary
 
     candidates: list[Path] = []
+    if _is_windows():
+        candidates.extend(_windows_appx_codex_cli_candidates())
     try:
         candidates.extend(_codex_app_server_candidates(store.load_config().codex_app_path))
     except (OSError, ValueError):
@@ -587,22 +589,27 @@ def _codex_app_server_candidates(codex_app_path: Path) -> list[Path]:
     candidates: list[Path] = []
     if _is_windows():
         configured_dir = configured.parent if configured.suffix.lower() == ".exe" else configured
+        relative_cli_locations = (
+            Path("resources") / "codex.exe",
+            Path("resources") / "bin" / "codex.exe",
+            Path("resources") / "app" / "codex.exe",
+            Path("resources") / "app.asar.unpacked" / "codex.exe",
+            Path("resources") / "app.asar.unpacked" / "bin" / "codex.exe",
+            Path("codex.exe"),
+        )
         candidates.extend(
-            [
-                configured_dir / "resources" / "codex.exe",
-                configured_dir / "resources" / "bin" / "codex.exe",
-                configured_dir / "resources" / "app" / "codex.exe",
-                configured_dir / "codex.exe",
-            ]
+            configured_dir / relative_path
+            for relative_path in relative_cli_locations
         )
         for root in _windows_program_roots():
+            for app_dir in _windows_codex_app_dirs(root):
+                candidates.extend(app_dir / relative_path for relative_path in relative_cli_locations)
+        appdata = os.getenv("APPDATA")
+        if appdata:
             candidates.extend(
                 [
-                    root / "Programs" / "Codex" / "resources" / "codex.exe",
-                    root / "Programs" / "Codex" / "resources" / "bin" / "codex.exe",
-                    root / "Programs" / "Codex" / "codex.exe",
-                    root / "Codex" / "resources" / "codex.exe",
-                    root / "Codex" / "codex.exe",
+                    Path(appdata) / "npm" / "codex.cmd",
+                    Path(appdata) / "npm" / "codex.exe",
                 ]
             )
         return _dedupe_paths(candidates)
@@ -621,6 +628,66 @@ def _windows_program_roots() -> list[Path]:
     if not roots:
         roots.append(Path.home() / "AppData" / "Local")
     return roots
+
+
+def _windows_codex_app_dirs(root: Path) -> list[Path]:
+    return [
+        root / "Programs" / "Codex",
+        root / "Programs" / "OpenAI Codex",
+        root / "Codex",
+        root / "OpenAI" / "Codex",
+    ]
+
+
+def _windows_appx_codex_cli_candidates() -> list[Path]:
+    powershell = shutil.which("powershell") or shutil.which("pwsh") or "powershell"
+    script = "Get-AppxPackage -Name 'OpenAI.Codex' | Select-Object -ExpandProperty InstallLocation"
+    try:
+        output = subprocess.check_output(
+            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError, TimeoutError):
+        return []
+
+    candidates: list[Path] = []
+    for line in output.splitlines():
+        install_location = line.strip()
+        if not install_location:
+            continue
+        source_cli = Path(install_location) / "app" / "resources" / "codex.exe"
+        cached_cli = _cache_windows_appx_codex_cli(source_cli)
+        if cached_cli is not None:
+            candidates.append(cached_cli)
+        candidates.append(source_cli)
+    return _dedupe_paths(candidates)
+
+
+def _cache_windows_appx_codex_cli(source_cli: Path) -> Path | None:
+    try:
+        if not source_cli.is_file():
+            return None
+        target_dir = Path.home().expanduser().resolve() / "codex_switch_data" / "codex_cli"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_cli = target_dir / "codex.exe"
+        if _should_refresh_cached_cli(source_cli, target_cli):
+            shutil.copy2(source_cli, target_cli)
+        return target_cli if target_cli.is_file() else None
+    except OSError:
+        return None
+
+
+def _should_refresh_cached_cli(source_cli: Path, target_cli: Path) -> bool:
+    try:
+        if not target_cli.exists():
+            return True
+        source_stat = source_cli.stat()
+        target_stat = target_cli.stat()
+    except OSError:
+        return True
+    return source_stat.st_size != target_stat.st_size or source_stat.st_mtime > target_stat.st_mtime
 
 
 def _dedupe_paths(paths: list[Path]) -> list[Path]:

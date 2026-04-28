@@ -575,6 +575,63 @@ class SwitcherServerTests(unittest.TestCase):
         ):
             self.assertEqual(_resolve_codex_binary(self.store), str(binary_path.resolve()))
 
+    def test_resolve_codex_binary_uses_windows_app_asar_unpacked_binary(self) -> None:
+        app_path = self.root / "Programs" / "Codex" / "Codex.exe"
+        binary_path = app_path.parent / "resources" / "app.asar.unpacked" / "bin" / "codex.exe"
+        binary_path.parent.mkdir(parents=True)
+        app_path.write_text("gui", encoding="utf-8")
+        binary_path.write_text("cli", encoding="utf-8")
+        config = SwitcherConfig(
+            primary_account_id=None,
+            last_selected_account_id=None,
+            codex_app_path=app_path,
+            launch_profiles={},
+        )
+
+        with (
+            patch.dict(os.environ, {"CODEX_BINARY": "", "LOCALAPPDATA": str(self.root)}, clear=False),
+            patch("codex_profile_switcher.server._is_windows", return_value=True),
+            patch("codex_profile_switcher.server.shutil.which", return_value=None),
+            patch.object(self.store, "load_config", return_value=config),
+        ):
+            self.assertEqual(_resolve_codex_binary(self.store), str(binary_path.resolve()))
+
+    def test_resolve_codex_binary_checks_windows_roaming_npm_shim(self) -> None:
+        appdata = self.root / "AppData" / "Roaming"
+        binary_path = appdata / "npm" / "codex.cmd"
+        binary_path.parent.mkdir(parents=True)
+        binary_path.write_text("@echo off\n", encoding="utf-8")
+
+        with (
+            patch.dict(
+                os.environ,
+                {"CODEX_BINARY": "", "LOCALAPPDATA": str(self.root), "APPDATA": str(appdata)},
+                clear=False,
+            ),
+            patch("codex_profile_switcher.server._is_windows", return_value=True),
+            patch("codex_profile_switcher.server.shutil.which", return_value=None),
+        ):
+            self.assertEqual(Path(_resolve_codex_binary(self.store)).resolve(), binary_path.resolve())
+
+    def test_resolve_codex_binary_caches_windows_store_cli(self) -> None:
+        package_root = self.root / "WindowsApps" / "OpenAI.Codex_test"
+        source_cli = package_root / "app" / "resources" / "codex.exe"
+        source_cli.parent.mkdir(parents=True)
+        source_cli.write_text("store cli", encoding="utf-8")
+
+        with (
+            patch.dict(os.environ, {"CODEX_BINARY": ""}, clear=False),
+            patch("codex_profile_switcher.server._is_windows", return_value=True),
+            patch("codex_profile_switcher.server.shutil.which", return_value=None),
+            patch("codex_profile_switcher.server.subprocess.check_output", return_value=f"{package_root}\n"),
+            patch("codex_profile_switcher.server.Path.home", return_value=self.root),
+        ):
+            resolved = Path(_resolve_codex_binary(self.store))
+
+        cached_cli = self.root / "codex_switch_data" / "codex_cli" / "codex.exe"
+        self.assertEqual(resolved.resolve(), cached_cli.resolve())
+        self.assertEqual(cached_cli.read_text(encoding="utf-8"), "store cli")
+
     def test_list_backend_processes_parses_windows_process_listing(self) -> None:
         output = json.dumps(
             [

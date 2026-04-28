@@ -34,6 +34,12 @@ class LauncherTests(unittest.TestCase):
         command = build_codex_vscode_extension_command()
         self.assertEqual(command, ["open", CODEX_VSCODE_URI])
 
+    def test_build_codex_vscode_extension_command_uses_explorer_on_windows(self) -> None:
+        with patch("codex_profile_switcher.launcher.os.name", "nt"):
+            command = build_codex_vscode_extension_command()
+
+        self.assertEqual(command, ["explorer.exe", CODEX_VSCODE_URI])
+
     def test_default_codex_profile_is_rejected(self) -> None:
         self.assertFalse(is_safe_codex_user_data_dir(DEFAULT_CODEX_USER_DATA_DIR))
         self.assertFalse(is_safe_codex_user_data_dir(DEFAULT_CODEX_USER_DATA_DIR / "Default"))
@@ -68,6 +74,18 @@ class LauncherTests(unittest.TestCase):
             (789, "/bin/bash"),
         ]
         with patch("codex_profile_switcher.launcher._read_process_listing", return_value=process_listing):
+            self.assertEqual(running_vscode_pids(), [123])
+
+    def test_running_vscode_pids_detects_windows_code_process(self) -> None:
+        process_listing = [
+            (123, r"C:\Users\Owner\AppData\Local\Programs\Microsoft VS Code\Code.exe"),
+            (456, r"C:\Users\Owner\AppData\Local\Programs\Microsoft VS Code\Code Helper.exe"),
+            (789, r"C:\Windows\System32\cmd.exe"),
+        ]
+        with (
+            patch("codex_profile_switcher.launcher.os.name", "nt"),
+            patch("codex_profile_switcher.launcher._read_process_listing", return_value=process_listing),
+        ):
             self.assertEqual(running_vscode_pids(), [123])
 
     def test_terminate_running_codex_sends_sigterm(self) -> None:
@@ -107,6 +125,31 @@ class LauncherTests(unittest.TestCase):
         popen.assert_called_once()
         self.assertEqual(popen.call_args.args[0], [str(executable)])
 
+    def test_build_codex_launch_command_uses_windows_store_app_id_for_appx(self) -> None:
+        appx_executable = Path(
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0\app\Codex.exe"
+        )
+        with (
+            patch("codex_profile_switcher.launcher.os.name", "nt"),
+            patch("codex_profile_switcher.launcher.codex_executable_path", return_value=appx_executable),
+            patch("codex_profile_switcher.launcher._windows_codex_app_id", return_value="OpenAI.Codex_2p2nqsd0c76g0!App"),
+        ):
+            command = build_codex_launch_command(Path(r"C:\Unused\Codex.exe"))
+
+        self.assertEqual(command, ["explorer.exe", r"shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App"])
+
+    def test_codex_executable_path_falls_back_to_windows_store_app(self) -> None:
+        appx_executable = Path(
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_1.0.0.0_x64__2p2nqsd0c76g0\app\Codex.exe"
+        )
+        configured_path = Path("/missing/Codex.exe")
+        with (
+            patch("codex_profile_switcher.launcher.os.name", "nt"),
+            patch("codex_profile_switcher.launcher.Path.is_file", return_value=False),
+            patch("codex_profile_switcher.launcher._windows_appx_codex_executable_path", return_value=appx_executable),
+        ):
+            self.assertEqual(codex_executable_path(configured_path), appx_executable)
+
     def test_terminate_running_vscode_quits_then_sigterms_stubborn_process(self) -> None:
         with (
             patch("codex_profile_switcher.launcher.running_vscode_pids", return_value=[123]),
@@ -119,6 +162,20 @@ class LauncherTests(unittest.TestCase):
         run.assert_called_once()
         kill.assert_called_once_with(123, signal.SIGTERM)
         self.assertEqual(wait_for_exit.call_count, 2)
+
+    def test_terminate_running_vscode_sigterms_windows_process(self) -> None:
+        with (
+            patch("codex_profile_switcher.launcher.os.name", "nt"),
+            patch("codex_profile_switcher.launcher.running_vscode_pids", return_value=[123]),
+            patch("codex_profile_switcher.launcher._wait_for_vscode_exit", return_value=set()) as wait_for_exit,
+            patch("subprocess.run") as run,
+            patch("os.kill") as kill,
+        ):
+            self.assertTrue(terminate_running_vscode())
+
+        run.assert_not_called()
+        kill.assert_called_once_with(123, signal.SIGTERM)
+        wait_for_exit.assert_called_once_with({123}, 8.0)
 
     def test_launch_codex_vscode_extension_restarts_vscode_and_opens_extension_uri(self) -> None:
         with (

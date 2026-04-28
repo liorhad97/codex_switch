@@ -58,11 +58,15 @@ class CodexAppServerConnection:
                     bufsize=1,
                 )
             except OSError as error:
-                raise RuntimeError(
-                    "Could not start Codex app-server. Install Codex, make sure the codex CLI is on PATH, "
-                    "or set CODEX_BINARY to the codex executable path. "
-                    f"Tried: {self._codex_binary}. {error}"
-                ) from error
+                hint = (
+                    "Could not start Codex app-server because the Codex CLI was not found. "
+                    "Install and open Codex Desktop on this Windows account, or set CODEX_BINARY to the full "
+                    "codex.exe path, then restart codex switch."
+                    if isinstance(error, FileNotFoundError)
+                    else "Could not start Codex app-server. Install Codex, make sure the codex CLI is on PATH, "
+                    "or set CODEX_BINARY to the codex executable path."
+                )
+                raise RuntimeError(f"{hint} Tried: {self._codex_binary}. {error}") from error
             self._process = process
             self._started = True
 

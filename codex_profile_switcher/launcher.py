@@ -38,6 +38,7 @@ CODEX_TERMINATION_TIMEOUT_SECONDS = 5.0
 CODEX_TERMINATION_POLL_INTERVAL_SECONDS = 0.1
 VSCODE_TERMINATION_TIMEOUT_SECONDS = 8.0
 FORCE_TERMINATION_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
+WINDOWS_CODEX_APP_NAME = "Codex"
 
 
 def _is_same_or_nested(path: Path, other: Path) -> bool:
@@ -57,12 +58,17 @@ def is_safe_codex_user_data_dir(path: Path) -> bool:
 def codex_executable_path(codex_app_path: Path) -> Path:
     resolved_app = codex_app_path.expanduser().resolve()
     if os.name == "nt":
-        if resolved_app.suffix.lower() == ".exe":
+        if resolved_app.suffix.lower() == ".exe" and resolved_app.is_file():
             return resolved_app
         for candidate_name in ("Codex.exe", "codex.exe"):
             candidate = resolved_app / candidate_name
             if candidate.is_file():
                 return candidate
+        appx_executable = _windows_appx_codex_executable_path()
+        if appx_executable is not None:
+            return appx_executable
+        if resolved_app.suffix.lower() == ".exe":
+            return resolved_app
         return resolved_app / "Codex.exe"
     return resolved_app / "Contents" / "MacOS" / resolved_app.stem
 
@@ -137,6 +143,9 @@ def running_codex_pids(codex_app_path: Path) -> list[int]:
 
 
 def _matches_vscode_main_process(command: str) -> bool:
+    if os.name == "nt":
+        normalized = command.replace("/", "\\").lower()
+        return "\\code.exe" in normalized and "code helper" not in normalized
     if "/Visual Studio Code" not in command or "/Contents/Frameworks/" in command:
         return False
     return command.endswith(".app/Contents/MacOS/Code") or ".app/Contents/MacOS/Code " in command
@@ -220,16 +229,23 @@ def terminate_running_vscode(
     if not pids:
         return False
 
-    try:
-        subprocess.run(
-            ["osascript", "-e", f'tell application id "{VSCODE_BUNDLE_ID}" to quit'],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=min(max(timeout_seconds, 0.5), 5.0),
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        pass
+    if os.name == "nt":
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                continue
+    else:
+        try:
+            subprocess.run(
+                ["osascript", "-e", f'tell application id "{VSCODE_BUNDLE_ID}" to quit'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=min(max(timeout_seconds, 0.5), 5.0),
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
 
     stubborn_pids = _wait_for_vscode_exit(pids, timeout_seconds)
     if not stubborn_pids:
@@ -261,6 +277,11 @@ def build_codex_launch_command(
     account_home_dir: Path | None = None,
 ) -> list[str]:
     del user_data_dir, account_home_dir
+    if os.name == "nt":
+        app_id = _windows_codex_app_id()
+        executable = codex_executable_path(codex_app_path)
+        if app_id and (_is_windows_apps_path(executable) or not executable.is_file()):
+            return ["explorer.exe", f"shell:AppsFolder\\{app_id}"]
     executable = codex_executable_path(codex_app_path)
     return [str(executable)]
 
@@ -272,9 +293,9 @@ def launch_codex(
 ) -> None:
     del user_data_dir, account_home_dir
     terminate_running_codex(codex_app_path)
-    executable = codex_executable_path(codex_app_path)
+    command = build_codex_launch_command(codex_app_path)
     subprocess.Popen(
-        [str(executable)],
+        command,
         env=codex_launch_env(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -283,6 +304,8 @@ def launch_codex(
 
 
 def build_codex_vscode_extension_command() -> list[str]:
+    if os.name == "nt":
+        return ["explorer.exe", CODEX_VSCODE_URI]
     return ["open", CODEX_VSCODE_URI]
 
 
@@ -297,4 +320,61 @@ def launch_codex_vscode_extension() -> None:
 
 
 def reveal_in_finder(path: Path) -> None:
-    subprocess.Popen(["open", str(path.expanduser().resolve())])
+    resolved = str(path.expanduser().resolve())
+    if os.name == "nt":
+        subprocess.Popen(["explorer.exe", resolved])
+    else:
+        subprocess.Popen(["open", resolved])
+
+
+def _windows_appx_codex_executable_path() -> Path | None:
+    install_location = _windows_codex_appx_install_location()
+    if install_location is None:
+        return None
+    executable = install_location / "app" / "Codex.exe"
+    return executable if executable.is_file() else None
+
+
+def _windows_codex_app_id() -> str | None:
+    powershell = shutil.which("powershell") or shutil.which("pwsh") or "powershell"
+    script = (
+        f"Get-StartApps | Where-Object {{ $_.Name -eq '{WINDOWS_CODEX_APP_NAME}' }} | "
+        "Select-Object -First 1 -ExpandProperty AppID"
+    )
+    try:
+        output = subprocess.check_output(
+            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError, TimeoutError):
+        return None
+    for line in output.splitlines():
+        app_id = line.strip()
+        if app_id:
+            return app_id
+    return None
+
+
+def _windows_codex_appx_install_location() -> Path | None:
+    powershell = shutil.which("powershell") or shutil.which("pwsh") or "powershell"
+    script = "Get-AppxPackage -Name 'OpenAI.Codex' | Select-Object -First 1 -ExpandProperty InstallLocation"
+    try:
+        output = subprocess.check_output(
+            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError, TimeoutError):
+        return None
+    for line in output.splitlines():
+        install_location = line.strip()
+        if install_location:
+            return Path(install_location)
+    return None
+
+
+def _is_windows_apps_path(path: Path) -> bool:
+    return "windowsapps" in str(path).lower()

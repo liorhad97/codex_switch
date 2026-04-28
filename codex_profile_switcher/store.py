@@ -570,7 +570,7 @@ class ProfileStore:
         if not path.exists():
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
             return None
 
@@ -598,7 +598,7 @@ class ProfileStore:
 
     def _validate_auth_json(self, path: Path) -> None:
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError(f"Selected account auth file is not valid JSON: {path}") from error
         if not isinstance(payload, dict):

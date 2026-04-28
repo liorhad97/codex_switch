@@ -350,9 +350,16 @@ code {
   background: #141d25;
   padding: 12px 14px;
   color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.relay-sidebar-feedback {
+  font-size: 0.92rem;
 }
 
 .relay-feedback-warn {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: rgba(255, 143, 150, 0.08);
   color: var(--danger);
 }
 

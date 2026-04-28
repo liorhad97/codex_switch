@@ -667,6 +667,9 @@ function App() {
   const pendingOAuthFlow = state?.pending_oauth_flow || null;
   const selectedAccount =
     accounts.find((account) => account.id === state?.selected_account_id) || accounts[0] || null;
+  const feedbackIsWarning = Boolean(
+    feedback && /failed|could not|error|missing|not found|request failed|invalid|install/i.test(feedback)
+  );
   const recommendedPlusAccount = getRecommendedPlusAccount(accounts);
   const recommendedAccount = recommendedPlusAccount || getRecommendedFreeAccount(accounts);
   const recommendedIsFreeFallback = Boolean(recommendedAccount && !recommendedPlusAccount && isFreeAccount(recommendedAccount));
@@ -1004,6 +1007,17 @@ function App() {
                 {busyKey === `select:${recommendedAccount?.id}` ? "Choosing..." : "Pick Best"}
               </button>
             </div>
+            {feedback ? (
+              <div
+                className={["relay-feedback", "relay-sidebar-feedback", feedbackIsWarning ? "relay-feedback-warn" : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+                role={feedbackIsWarning ? "alert" : "status"}
+                aria-live="polite"
+              >
+                {feedback}
+              </div>
+            ) : null}
           </div>
 
           <div className="relay-sidebar-body">
@@ -1044,8 +1058,6 @@ function App() {
                 </div>
                 {selectedAccount.app_primary ? <span className="relay-pill relay-pill-primary">Primary</span> : null}
               </div>
-
-              {feedback ? <div className="relay-feedback">{feedback}</div> : null}
 
               {selectedOauthFlow && !selectedHasUsage ? (
                 <SignInPanel

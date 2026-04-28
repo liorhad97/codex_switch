@@ -302,6 +302,17 @@ class ProfileStoreTests(unittest.TestCase):
             (self.paths.prepared_profiles_root / "local-1").resolve(),
         )
 
+    def test_load_config_accepts_utf8_bom(self) -> None:
+        self.paths.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.config_path.write_text(
+            "\ufeff" + json.dumps({"codex_app_path": "C:/Codex/Codex.exe"}),
+            encoding="utf-8",
+        )
+
+        config = self.store.load_config()
+
+        self.assertEqual(config.codex_app_path, Path("C:/Codex/Codex.exe").resolve())
+
     def _write_auth(self, home_dir: Path, token: str) -> Path:
         auth_path = home_dir / ".codex" / "auth.json"
         auth_path.parent.mkdir(parents=True, exist_ok=True)
