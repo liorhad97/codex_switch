@@ -208,6 +208,11 @@ jobs:
         if: runner.os == 'Windows'
         run: npm run ${{ matrix.script }}
 
+      - name: Smoke test Windows packaged app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/windows-packaged-smoke.ps1
+
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
