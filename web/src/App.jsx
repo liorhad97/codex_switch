@@ -391,7 +391,8 @@ function UpdatePanel({ updateState, busyKey, onCheck, onDownload, onInstall }) {
     checking ||
     busyKey === "download-update" ||
     busyKey === "install-update" ||
-    updateState?.phase === "downloading";
+    updateState?.phase === "downloading" ||
+    updateState?.phase === "installing";
   const checkDisabled = !supported || updateBusy;
   const message = updateState
     ? updateState.message || "Check for updates."
@@ -404,8 +405,8 @@ function UpdatePanel({ updateState, busyKey, onCheck, onDownload, onInstall }) {
     const progress = typeof updateState?.progressPercent === "number" ? ` ${Math.round(updateState.progressPercent)}%` : "";
     actionLabel = `Downloading...${progress}`;
     disabled = true;
-  } else if (busyKey === "install-update") {
-    actionLabel = "Restarting...";
+  } else if (busyKey === "install-update" || updateState?.phase === "installing") {
+    actionLabel = "Installing...";
     disabled = true;
   } else if (updateState?.phase === "available") {
     actionLabel = updateState.version ? `Download ${updateState.version}` : "Download Update";
@@ -447,6 +448,31 @@ function UpdatePanel({ updateState, busyKey, onCheck, onDownload, onInstall }) {
         {checkedAt ? <span className="relay-update-meta">{checkedAt}</span> : null}
       </div>
     </section>
+  );
+}
+
+function UpdateInstallScreen({ updateState }) {
+  const versionLabel = updateState?.version ? `Version ${updateState.version}` : "New version";
+
+  return (
+    <div className="relay-update-screen" role="status" aria-live="assertive">
+      <div className="relay-update-screen-panel">
+        <div className="relay-update-screen-brand">CS</div>
+        <p className="relay-main-label">codex switch update</p>
+        <h2 className="relay-update-screen-title">{versionLabel} is being installed</h2>
+        <p className="relay-update-screen-copy">
+          The app will close briefly, apply the update, and reopen automatically.
+        </p>
+        <div className="relay-update-screen-progress" aria-hidden="true">
+          <span />
+        </div>
+        <div className="relay-update-screen-steps" aria-hidden="true">
+          <span>Downloaded</span>
+          <span>Installing</span>
+          <span>Reopening</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -974,6 +1000,7 @@ function App() {
   const codexDesktopBusy = busyKey === `launch-desktop:${selectedAccount?.id}`;
   const vscodeBusy = busyKey === `launch-vscode:${selectedAccount?.id}`;
   const updateNeedsAttention = updateState?.phase === "available" || updateState?.phase === "downloaded";
+  const installingUpdate = busyKey === "install-update" || updateState?.phase === "installing";
 
   return (
     <div className="app-frame" aria-busy={loading}>
@@ -1192,6 +1219,7 @@ function App() {
         onCancel={cancelPendingSignIn}
         cancelBusy={busyKey === "cancel-pending-oauth"}
       />
+      {installingUpdate ? <UpdateInstallScreen updateState={updateState} /> : null}
     </div>
   );
 }

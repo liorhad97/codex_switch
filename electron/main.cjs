@@ -155,6 +155,9 @@ function initializeAutoUpdater() {
   });
 
   autoUpdater.on("error", (error) => {
+    if (updaterState.phase === "installing") {
+      updateInstallRequested = false;
+    }
     setUpdaterState({
       supported: true,
       configured: true,
@@ -438,7 +441,30 @@ ipcMain.handle("updater:install", async () => {
     return updaterState;
   }
   updateInstallRequested = true;
-  autoUpdater.quitAndInstall();
+  setUpdaterState({
+    supported: true,
+    configured: true,
+    phase: "installing",
+    progressPercent: 100,
+    message: updaterState.version
+      ? `Installing version ${updaterState.version}. Codex Switch will reopen automatically.`
+      : "Installing update. Codex Switch will reopen automatically."
+  });
+
+  setTimeout(() => {
+    const isSilent = process.platform === "win32";
+    try {
+      autoUpdater.quitAndInstall(isSilent, true);
+    } catch (error) {
+      updateInstallRequested = false;
+      setUpdaterState({
+        phase: "error",
+        progressPercent: null,
+        message: error?.message || "Could not start the update installer."
+      });
+    }
+  }, 900);
+
   return updaterState;
 });
 ipcMain.handle("shell:open-external", async (_event, url) => {

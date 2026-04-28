@@ -48,6 +48,97 @@ code {
   overflow: hidden;
 }
 
+.relay-update-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #0b1115;
+}
+
+.relay-update-screen-panel {
+  width: min(560px, 100%);
+  display: grid;
+  justify-items: start;
+  gap: 16px;
+}
+
+.relay-update-screen-brand {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border));
+  border-radius: 16px;
+  background: var(--panel-strong);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.relay-update-screen-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 3.4rem;
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.relay-update-screen-copy {
+  max-width: 480px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.relay-update-screen-progress {
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+}
+
+.relay-update-screen-progress span {
+  display: block;
+  width: 92%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform-origin: left center;
+  animation: relay-update-progress 1400ms ease-in-out infinite alternate;
+}
+
+.relay-update-screen-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-soft);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.relay-update-screen-steps span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: var(--panel);
+}
+
+@keyframes relay-update-progress {
+  from {
+    transform: scaleX(0.54);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
@@ -575,6 +666,10 @@ code {
 
   .relay-main-header {
     padding-right: 0;
+  }
+
+  .relay-update-screen-title {
+    font-size: 2.2rem;
   }
 
   .relay-usage-grid {
