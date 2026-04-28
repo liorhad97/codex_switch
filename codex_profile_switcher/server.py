@@ -76,7 +76,25 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
     def switcher(self) -> "SwitcherServer":
         return self.server  # type: ignore[return-value]
 
+    def _is_origin_allowed(self) -> bool:
+        origin = self.headers.get("Origin")
+        host = self.headers.get("Host", "")
+        # Validate Host header to prevent DNS-rebinding attacks.
+        # Only accept requests targeting the loopback interface.
+        host_name = host.split(":")[0]
+        if host_name not in {"127.0.0.1", "localhost", "[::1]", ""}:
+            return False
+        # Reject cross-origin requests (Origin present and not localhost).
+        if origin is not None:
+            parsed_origin = urlsplit(origin)
+            if parsed_origin.hostname not in {"127.0.0.1", "localhost", "::1", None}:
+                return False
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
+        if not self._is_origin_allowed():
+            self._send_json({"error": "Forbidden"}, status=HTTPStatus.FORBIDDEN)
+            return
         parsed = urlsplit(self.path)
         if parsed.path == "/api/health":
             self._send_json({"ok": True})
@@ -91,6 +109,9 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._is_origin_allowed():
+            self._send_json({"error": "Forbidden"}, status=HTTPStatus.FORBIDDEN)
+            return
         if self.path == "/api/accounts/add":
             payload = self._read_json_body()
             label = payload.get("label")
@@ -209,6 +230,9 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
         self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
 
     def do_DELETE(self) -> None:  # noqa: N802
+        if not self._is_origin_allowed():
+            self._send_json({"error": "Forbidden"}, status=HTTPStatus.FORBIDDEN)
+            return
         account_match = re.fullmatch(r"/api/accounts/([^/]+)", self.path)
         if account_match:
             try:
@@ -659,6 +683,12 @@ def _load_flutty_live_accounts() -> dict[str, dict[str, Any]]:
 
     api_base = _FLUTTY_LIVE_STATE_CACHE.get("api_base") or _detect_flutty_api_base()
     if not api_base:
+        _FLUTTY_LIVE_STATE_CACHE["cooldown_until"] = now + 15
+        return {}
+
+    # Only allow http/https schemes to prevent SSRF via file:// or other custom schemes.
+    parsed_api_base = urlsplit(api_base)
+    if parsed_api_base.scheme not in {"http", "https"}:
         _FLUTTY_LIVE_STATE_CACHE["cooldown_until"] = now + 15
         return {}
 
