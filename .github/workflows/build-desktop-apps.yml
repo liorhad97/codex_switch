@@ -153,5 +153,6 @@ jobs:
 
       - name: Publish release artifacts to R2
         env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: CODEX_SWITCH_RELEASE_DIR=release npm run publish:updates

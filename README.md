@@ -91,6 +91,7 @@ The GitHub Actions workflow builds both macOS and Windows apps and then publishe
 For normal `main` commits and manual runs, the workflow stamps the build with a unique updater version using the package major/minor plus the GitHub run number so Electron clients see it as a newer release. For `v*` tags, the tag version is used. Add this repository secret before using the workflow:
 
 - `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
 
 macOS updater releases must be signed with a stable certificate. Without this, Squirrel/Mac rejects `Restart to Update` with a code-signature validation error because each ad-hoc build has a different code hash. For public distribution, use an Apple Developer ID Application certificate and notarization. For internal/test distribution without the Apple Developer Program, a stable self-signed code-signing certificate can keep updater signatures consistent, but users will still see macOS trust warnings. Add these repository secrets before publishing macOS updates:
 
