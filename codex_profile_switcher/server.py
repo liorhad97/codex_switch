@@ -78,16 +78,19 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
 
     def _is_origin_allowed(self) -> bool:
         origin = self.headers.get("Origin")
-        host = self.headers.get("Host", "")
+        host = self.headers.get("Host")
         # Validate Host header to prevent DNS-rebinding attacks.
-        # Only accept requests targeting the loopback interface.
-        host_name = host.split(":")[0]
-        if host_name not in {"127.0.0.1", "localhost", "[::1]", ""}:
+        # Reject requests with no Host header or a non-localhost Host.
+        if not host:
+            return False
+        # Strip port and brackets from the Host header to get the bare hostname.
+        host_name = urlsplit(f"http://{host}").hostname or ""
+        if host_name not in {"127.0.0.1", "localhost", "::1"}:
             return False
         # Reject cross-origin requests (Origin present and not localhost).
         if origin is not None:
             parsed_origin = urlsplit(origin)
-            if parsed_origin.hostname not in {"127.0.0.1", "localhost", "::1", None}:
+            if parsed_origin.hostname not in {"127.0.0.1", "localhost", "::1"}:
                 return False
         return True
 
