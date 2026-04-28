@@ -570,6 +570,9 @@ def _detect_flutty_api_base() -> str | None:
     if explicit:
         return explicit.rstrip("/")
 
+    if os.name == "nt":
+        return None
+
     try:
         output = subprocess.check_output(["ps", "-Ao", "command"], text=True)
     except (subprocess.SubprocessError, OSError):

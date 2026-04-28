@@ -13,6 +13,7 @@ VSCODE_BUNDLE_ID = "com.microsoft.VSCode"
 CODEX_TERMINATION_TIMEOUT_SECONDS = 5.0
 CODEX_TERMINATION_POLL_INTERVAL_SECONDS = 0.1
 VSCODE_TERMINATION_TIMEOUT_SECONDS = 8.0
+FORCE_TERMINATION_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 
 def _is_same_or_nested(path: Path, other: Path) -> bool:
@@ -139,7 +140,7 @@ def terminate_running_codex(
 
     for pid in stubborn_pids:
         try:
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, FORCE_TERMINATION_SIGNAL)
         except OSError:
             continue
 
@@ -182,7 +183,7 @@ def terminate_running_vscode(
 
     for pid in stubborn_pids:
         try:
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, FORCE_TERMINATION_SIGNAL)
         except OSError:
             continue
 

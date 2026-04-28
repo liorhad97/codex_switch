@@ -208,17 +208,16 @@ class ProfileStoreTests(unittest.TestCase):
     def test_load_config_normalizes_home_launch_profile_to_profile_root(self) -> None:
         self.paths.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.paths.config_path.write_text(
-            """
-{
-  "codex_app_path": "/Applications/Codex.app",
-  "launch_profiles": {
-    "local-1": "%s"
-  },
-  "last_selected_account_id": "local-1",
-  "primary_account_id": "local-1"
-}
-"""
-            % str(self.paths.prepared_profiles_root / "local-1" / "home"),
+            json.dumps(
+                {
+                    "codex_app_path": "/Applications/Codex.app",
+                    "launch_profiles": {
+                        "local-1": str(self.paths.prepared_profiles_root / "local-1" / "home"),
+                    },
+                    "last_selected_account_id": "local-1",
+                    "primary_account_id": "local-1",
+                }
+            ),
             encoding="utf-8",
         )
 
