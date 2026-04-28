@@ -25,6 +25,7 @@ module.exports = {
   asar: true,
   mac: {
     icon: "electron/assets/codex-switch-icon.icns",
+    forceCodeSigning: true,
     target: [
       "dmg",
       "zip"
