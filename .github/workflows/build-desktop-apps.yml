@@ -41,7 +41,6 @@ jobs:
               windows-installer/*.blockmap
 
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: false
       PYTHON: python
       CODEX_SWITCH_UPDATE_BASE_URL: https://pub-1fc6be6e977a4adf8a928d5e615d8f54.r2.dev
 
@@ -77,6 +76,85 @@ jobs:
             exit 1
           fi
 
+      - name: Prepare macOS signing keychain
+        if: runner.os == 'macOS'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KEYCHAIN_PATH="${RUNNER_TEMP}/codex-switch-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          CERT_PATH="${RUNNER_TEMP}/codex-switch-signing.p12"
+          CERT_PEM_PATH="${RUNNER_TEMP}/codex-switch-signing.pem"
+
+          export CERT_PATH
+          node <<'NODE'
+          const fs = require("fs");
+          const link = process.env.CSC_LINK || "";
+          const out = process.env.CERT_PATH;
+
+          (async () => {
+            if (/^https?:\/\//i.test(link)) {
+              const response = await fetch(link, { redirect: "follow" });
+              if (!response.ok) {
+                throw new Error(`Failed to download certificate: HTTP ${response.status}`);
+              }
+              fs.writeFileSync(out, Buffer.from(await response.arrayBuffer()), { mode: 0o600 });
+            } else if (fs.existsSync(link)) {
+              fs.copyFileSync(link, out);
+              fs.chmodSync(out, 0o600);
+            } else {
+              const base64 = link.replace(/^data:.*;base64,/i, "").replace(/\s/g, "");
+              fs.writeFileSync(out, Buffer.from(base64, "base64"), { mode: 0o600 });
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          EXISTING_KEYCHAINS=()
+          while IFS= read -r keychain; do
+            [[ -n "${keychain}" ]] && EXISTING_KEYCHAINS+=("${keychain}")
+          done < <(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//')
+          security list-keychains -d user -s "${KEYCHAIN_PATH}" "${EXISTING_KEYCHAINS[@]}"
+
+          security import "${CERT_PATH}" -k "${KEYCHAIN_PATH}" -P "${CSC_KEY_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          VALID_IDENTITY_COUNT="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | awk '/valid identities found/{print $1}')"
+
+          if [[ "${VALID_IDENTITY_COUNT:-0}" == "0" ]] && openssl pkcs12 -in "${CERT_PATH}" -clcerts -nokeys -passin "pass:${CSC_KEY_PASSWORD}" -out "${CERT_PEM_PATH}" >/dev/null 2>&1; then
+            security add-trusted-cert -p codeSign -r trustRoot -k "${KEYCHAIN_PATH}" "${CERT_PEM_PATH}" >/dev/null 2>&1 &
+            TRUST_PID="$!"
+            for _ in {1..30}; do
+              if ! kill -0 "${TRUST_PID}" >/dev/null 2>&1; then
+                wait "${TRUST_PID}" || true
+                break
+              fi
+              sleep 1
+            done
+            if kill -0 "${TRUST_PID}" >/dev/null 2>&1; then
+              echo "::warning::Timed out while adding code-signing trust settings; continuing with identity validation."
+              kill "${TRUST_PID}" >/dev/null 2>&1 || true
+              wait "${TRUST_PID}" || true
+            fi
+            VALID_IDENTITY_COUNT="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | awk '/valid identities found/{print $1}')"
+          fi
+
+          security find-identity -v -p codesigning "${KEYCHAIN_PATH}"
+          if [[ "${VALID_IDENTITY_COUNT:-0}" == "0" ]]; then
+            echo "::error::CSC_LINK was imported, but no valid macOS code-signing identity was found. Use an Apple Developer ID Application certificate or a trusted self-signed code-signing certificate."
+            exit 1
+          fi
+
+          echo "CSC_KEYCHAIN=${KEYCHAIN_PATH}" >> "${GITHUB_ENV}"
+
       - name: Set updater version
         shell: bash
         run: |
@@ -102,13 +180,29 @@ jobs:
       - name: Build macOS app
         if: runner.os == 'macOS'
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          CSC_NAME: ${{ secrets.CSC_NAME }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run ${{ matrix.script }}
+
+      - name: Verify macOS app signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find mac-installer -maxdepth 3 -type d -name "codex switch.app" -print -quit)"
+          if [[ -z "${APP_PATH}" ]]; then
+            echo "::error::Cannot find packaged macOS app to verify."
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=4 "${APP_PATH}"
+          SIGNATURE_DETAILS="$(codesign -dv --verbose=4 "${APP_PATH}" 2>&1)"
+          echo "${SIGNATURE_DETAILS}"
+          if grep -q "Signature=adhoc" <<<"${SIGNATURE_DETAILS}"; then
+            echo "::error::Packaged macOS app is still ad-hoc signed. Refusing to publish an updater build that ShipIt cannot validate."
+            exit 1
+          fi
 
       - name: Build Windows app
         if: runner.os == 'Windows'
