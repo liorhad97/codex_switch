@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from dataclasses import asdict
@@ -7,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from codex_profile_switcher.models import OAuthFlowSnapshot
-from codex_profile_switcher.server import SwitcherServer
+from codex_profile_switcher.server import SwitcherServer, _resolve_codex_binary
 from codex_profile_switcher.store import AppPaths, ProfileStore
 
 
@@ -17,6 +18,7 @@ class FakeOAuthManager:
         self.store = store
         self.live_by_account_id: dict[str, dict[str, object]] = {}
         self.cached_by_account_id: dict[str, dict[str, object]] = {}
+        self.errors_by_account_id: dict[str, Exception] = {}
         self.refreshed_account_ids: list[str] = []
         self.persist_account_flags: list[bool] = []
         self.cancelled_account_ids: list[str] = []
@@ -34,6 +36,8 @@ class FakeOAuthManager:
     ):
         self.refreshed_account_ids.append(account.id)
         self.persist_account_flags.append(persist_account)
+        if account.id in self.errors_by_account_id:
+            raise self.errors_by_account_id[account.id]
         return self.live_by_account_id.get(account.id, {})
 
     def cached_account_state(self, account):  # noqa: ANN001
@@ -290,6 +294,29 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertEqual(payload["accounts"][0]["rate_limits"]["primary"]["usedPercent"], 12)
         self.assertEqual(payload["accounts"][0]["oauth"]["status"], "awaiting_browser")
 
+    def test_build_state_surfaces_usage_refresh_errors_when_limits_are_missing(self) -> None:
+        self.store.persist_local_oauth_account(
+            account_id="local-1",
+            label="local@example.com",
+            home_dir=self.paths.prepared_profiles_root / "local-1" / "home",
+            auth_mode="chatgpt_oauth",
+        )
+        self._write_auth(self.paths.prepared_profiles_root / "local-1" / "home")
+        oauth_manager = FakeOAuthManager()
+        oauth_manager.errors_by_account_id["local-1"] = RuntimeError("token invalidated")
+        server = SwitcherServer(
+            ("127.0.0.1", 0),
+            static_root=self.static_root,
+            store=self.store,
+            oauth_manager=oauth_manager,
+        )
+        try:
+            payload = server.build_state(refresh_usage=True)
+        finally:
+            server.server_close()
+
+        self.assertEqual(payload["accounts"][0]["last_error"], "Usage refresh failed: token invalidated")
+
     def test_cancel_account_sign_in_marks_local_account_disconnected(self) -> None:
         self.store.persist_local_oauth_account(
             account_id="local-1",
@@ -395,6 +422,20 @@ class SwitcherServerTests(unittest.TestCase):
         build_command.assert_called_once_with()
         launch_extension.assert_called_once_with()
         self.assertEqual(server.store.load_config().primary_account_id, "local-1")
+
+    def test_resolve_codex_binary_uses_configured_app_bundle_when_path_is_minimal(self) -> None:
+        app_path = self.root / "Codex.app"
+        binary_path = app_path / "Contents" / "Resources" / "codex"
+        binary_path.parent.mkdir(parents=True)
+        binary_path.write_text("#!/bin/sh\n", encoding="utf-8")
+        binary_path.chmod(0o755)
+        self.store.set_codex_app_path(self.store.load_config(), app_path)
+
+        with (
+            patch.dict(os.environ, {"CODEX_BINARY": ""}, clear=False),
+            patch("codex_profile_switcher.server.shutil.which", return_value=None),
+        ):
+            self.assertEqual(_resolve_codex_binary(self.store), str(binary_path.resolve()))
 
     def _write_auth(self, home_dir: Path) -> Path:
         auth_path = home_dir / ".codex" / "auth.json"

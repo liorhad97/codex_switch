@@ -82,9 +82,28 @@ Publish the generated installer outputs to R2 with:
 npm run publish:updates
 ```
 
-The GitHub Actions workflow now builds the app and then publishes the resulting artifacts to R2. Add this repository secret before using the workflow:
+The GitHub Actions workflow builds both macOS and Windows apps and then publishes the resulting updater artifacts to R2. It runs on:
+
+- pushes to `main`
+- `v*` tags
+- manual runs from the Actions tab
+
+For normal `main` commits and manual runs, the workflow stamps the build with a unique updater version using the package major/minor plus the GitHub run number so Electron clients see it as a newer release. For `v*` tags, the tag version is used. Add this repository secret before using the workflow:
 
 - `CLOUDFLARE_API_TOKEN`
+
+macOS updater releases must be signed with a stable Apple Developer ID certificate. Without this, Squirrel/Mac rejects `Restart to Update` with a code-signature validation error because each ad-hoc build has a different code hash. Add these repository secrets before publishing macOS updates:
+
+- `CSC_LINK`: base64-encoded exported Developer ID Application `.p12`, or a private URL to it
+- `CSC_KEY_PASSWORD`: password for the exported `.p12`
+
+Notarization is optional for the updater swap itself, but recommended for user trust. To notarize in CI, also add:
+
+- `APPLE_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `APPLE_TEAM_ID`
+
+If users already installed an ad-hoc-signed build, they may need one manual reinstall from a Developer ID-signed `.dmg`; future signed updates can then install normally.
 
 You can still override the defaults if you move to another bucket or custom domain:
 

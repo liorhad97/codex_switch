@@ -3,8 +3,17 @@ name: Build desktop apps
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-switch-update-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -17,11 +26,19 @@ jobs:
           - name: macOS
             os: macos-latest
             script: dist:mac
-            artifact_path: mac-installer/*
+            artifact_path: |
+              mac-installer/latest-mac.yml
+              mac-installer/*.dmg
+              mac-installer/*.zip
+              mac-installer/*.blockmap
           - name: Windows
             os: windows-latest
             script: dist:win
-            artifact_path: windows-installer/*
+            artifact_path: |
+              windows-installer/latest.yml
+              windows-installer/*.exe
+              windows-installer/*.zip
+              windows-installer/*.blockmap
 
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: false
@@ -48,7 +65,52 @@ jobs:
           npm ci
           python -m pip install --upgrade pip pyinstaller
 
-      - name: Build app
+      - name: Require macOS signing certificate
+        if: runner.os == 'macOS'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          if [[ -z "${CSC_LINK}" || -z "${CSC_KEY_PASSWORD}" ]]; then
+            echo "::error::macOS updater releases must be signed with a stable Developer ID certificate. Set repository secrets CSC_LINK and CSC_KEY_PASSWORD before publishing updates."
+            exit 1
+          fi
+
+      - name: Set updater version
+        shell: bash
+        run: |
+          VERSION="$(node -e '
+            const pkg = require("./package.json");
+            const refType = process.env.GITHUB_REF_TYPE;
+            const refName = process.env.GITHUB_REF_NAME || "";
+            if (refType === "tag" && /^v?\\d+\\.\\d+\\.\\d+([-.+].*)?$/.test(refName)) {
+              console.log(refName.replace(/^v/, ""));
+              process.exit(0);
+            }
+            const [major = "0", minor = "0", patch = "0"] = String(pkg.version).split(/[+-]/)[0].split(".");
+            const runNumber = Number(process.env.GITHUB_RUN_NUMBER || 0);
+            const nextPatch = (Number(patch) || 0) + runNumber;
+            console.log(`${major}.${minor}.${nextPatch}`);
+          ')"
+          echo "BUILD_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Build macOS app
+        if: runner.os == 'macOS'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run ${{ matrix.script }}
+
+      - name: Build Windows app
+        if: runner.os == 'Windows'
         run: npm run ${{ matrix.script }}
 
       - name: Upload installer artifacts
@@ -85,7 +147,10 @@ jobs:
           pattern: codex-switch-*
           merge-multiple: true
 
+      - name: List release artifacts
+        run: find release -maxdepth 1 -type f -print | sort
+
       - name: Publish release artifacts to R2
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: npm run publish:updates
+        run: CODEX_SWITCH_RELEASE_DIR=release npm run publish:updates

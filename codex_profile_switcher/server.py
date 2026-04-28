@@ -254,7 +254,7 @@ class SwitcherServer(ThreadingHTTPServer):
     ) -> None:
         self.static_root = static_root
         self.store = store
-        codex_binary = os.getenv("CODEX_BINARY") or shutil.which("codex") or "codex"
+        codex_binary = _resolve_codex_binary(store)
         self.oauth = oauth_manager or AccountOAuthManager(
             store=store,
             workspace_root=Path.cwd(),
@@ -331,8 +331,13 @@ class SwitcherServer(ThreadingHTTPServer):
                     refresh_rate_limits=refresh_usage,
                     persist_account=account.source.startswith("local_"),
                 )
-            except Exception:
+            except Exception as error:
                 direct_live = self.oauth.cached_account_state(account)
+                if not isinstance(direct_live, dict):
+                    direct_live = {}
+                if not isinstance(_live_value(direct_live, "rate_limits", "rateLimits"), dict):
+                    direct_live = dict(direct_live)
+                    direct_live["last_error"] = _format_live_state_error(error)
             return _merge_live_state(upstream_live, direct_live)
         return upstream_live if isinstance(upstream_live, dict) else None
 
@@ -460,11 +465,44 @@ def _live_value(payload: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _format_live_state_error(error: Exception) -> str:
+    message = str(error).strip() or error.__class__.__name__
+    if len(message) > 240:
+        message = f"{message[:237]}..."
+    return f"Usage refresh failed: {message}"
+
+
 def _has_codex_auth(account: AccountRecord) -> bool:
     try:
         return (codex_home_path(account.home_dir) / "auth.json").is_file()
     except OSError:
         return False
+
+
+def _resolve_codex_binary(store: ProfileStore) -> str:
+    explicit = os.getenv("CODEX_BINARY")
+    if explicit:
+        return explicit
+
+    path_binary = shutil.which("codex")
+    if path_binary:
+        return path_binary
+
+    candidates: list[Path] = []
+    try:
+        candidates.append(store.load_config().codex_app_path / "Contents" / "Resources" / "codex")
+    except (OSError, ValueError):
+        pass
+    candidates.append(Path("/Applications/Codex.app/Contents/Resources/codex"))
+
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        except OSError:
+            continue
+
+    return "codex"
 
 
 def _merge_live_state(

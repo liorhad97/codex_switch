@@ -26,6 +26,7 @@ class _SessionState:
     plan_type: str | None = None
     rate_limits: dict[str, Any] | None = None
     last_rate_limit_refresh: datetime | None = None
+    last_error: str | None = None
 
 
 class AccountOAuthManager:
@@ -116,8 +117,9 @@ class AccountOAuthManager:
                 rate_limits = rate_limit_result.get("rateLimits")
                 session.rate_limits = rate_limits if isinstance(rate_limits, dict) else None
                 session.last_rate_limit_refresh = datetime.now(UTC)
-            except Exception:
-                pass
+                session.last_error = None
+            except Exception as error:
+                session.last_error = _format_account_state_error(error)
 
         return {
             "email": session.email,
@@ -125,6 +127,7 @@ class AccountOAuthManager:
             "plan_type": session.plan_type,
             "auth_mode": session.auth_mode,
             "rate_limits": session.rate_limits,
+            "last_error": session.last_error,
             "oauth": asdict(session.flow) if session.flow else None,
         }
 
@@ -140,6 +143,7 @@ class AccountOAuthManager:
                 "plan_type": session.plan_type,
                 "auth_mode": session.auth_mode or account.auth_mode,
                 "rate_limits": session.rate_limits or account.rate_limits,
+                "last_error": session.last_error or account.last_error,
                 "oauth": asdict(session.flow) if session.flow else account.oauth,
             }
 
@@ -150,6 +154,7 @@ class AccountOAuthManager:
             "plan_type": None,
             "auth_mode": account.auth_mode,
             "rate_limits": account.rate_limits,
+            "last_error": account.last_error,
             "oauth": asdict(snapshot) if snapshot else account.oauth,
         }
 
@@ -276,6 +281,7 @@ class AccountOAuthManager:
             rate_limits = params.get("rateLimits")
             session.rate_limits = rate_limits if isinstance(rate_limits, dict) else None
             session.last_rate_limit_refresh = datetime.now(UTC)
+            session.last_error = None
 
     @staticmethod
     def _rate_limits_stale(session: _SessionState) -> bool:
@@ -312,3 +318,10 @@ class AccountOAuthManager:
         session.email = label
         session.flow = None
         session.auth_mode = account.auth_mode
+
+
+def _format_account_state_error(error: Exception) -> str:
+    message = str(error).strip() or error.__class__.__name__
+    if len(message) > 240:
+        message = f"{message[:237]}..."
+    return f"Usage refresh failed: {message}"
