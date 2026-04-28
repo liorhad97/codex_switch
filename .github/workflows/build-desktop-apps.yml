@@ -130,7 +130,7 @@ jobs:
           VALID_IDENTITY_COUNT="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | awk '/valid identities found/{print $1}')"
 
           if [[ "${VALID_IDENTITY_COUNT:-0}" == "0" ]] && openssl pkcs12 -in "${CERT_PATH}" -clcerts -nokeys -passin "pass:${CSC_KEY_PASSWORD}" -out "${CERT_PEM_PATH}" >/dev/null 2>&1; then
-            security add-trusted-cert -p codeSign -r trustRoot -k "${KEYCHAIN_PATH}" "${CERT_PEM_PATH}" >/dev/null 2>&1 &
+            sudo security add-trusted-cert -d -p codeSign -r trustRoot -k /Library/Keychains/System.keychain "${CERT_PEM_PATH}" >/dev/null 2>&1 &
             TRUST_PID="$!"
             for _ in {1..30}; do
               if ! kill -0 "${TRUST_PID}" >/dev/null 2>&1; then
@@ -140,7 +140,7 @@ jobs:
               sleep 1
             done
             if kill -0 "${TRUST_PID}" >/dev/null 2>&1; then
-              echo "::warning::Timed out while adding code-signing trust settings; continuing with identity validation."
+              echo "::warning::Timed out while adding system code-signing trust settings; continuing with identity validation."
               kill "${TRUST_PID}" >/dev/null 2>&1 || true
               wait "${TRUST_PID}" || true
             fi
