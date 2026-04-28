@@ -7,8 +7,29 @@ from pathlib import Path
 from typing import Any
 
 
+PENDING_OAUTH_MARKER = ".codex-switch-pending-oauth"
+
+
 def codex_home_path(home_dir: str | Path) -> Path:
     return Path(home_dir).expanduser().resolve().joinpath(".codex")
+
+
+def is_pending_oauth_profile(profile_root: str | Path) -> bool:
+    return Path(profile_root).expanduser().resolve().joinpath(PENDING_OAUTH_MARKER).is_file()
+
+
+def mark_pending_oauth_profile(profile_root: str | Path) -> None:
+    marker_path = Path(profile_root).expanduser().resolve().joinpath(PENDING_OAUTH_MARKER)
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text("pending\n", encoding="utf-8")
+
+
+def clear_pending_oauth_profile(profile_root: str | Path) -> None:
+    marker_path = Path(profile_root).expanduser().resolve().joinpath(PENDING_OAUTH_MARKER)
+    try:
+        marker_path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def sync_profile_home(home_dir: str | Path) -> Path:

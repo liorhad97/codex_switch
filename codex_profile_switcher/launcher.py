@@ -2,12 +2,36 @@ from __future__ import annotations
 
 import os
 import signal
+import shutil
 import subprocess
+import json
 import time
 from pathlib import Path
 
-DEFAULT_CODEX_APP_PATH = Path("/Applications/Codex.app")
-DEFAULT_CODEX_USER_DATA_DIR = Path.home() / "Library" / "Application Support" / "Codex"
+def _default_windows_local_appdata() -> Path:
+    value = os.getenv("LOCALAPPDATA")
+    return Path(value) if value else Path.home() / "AppData" / "Local"
+
+
+def _default_windows_roaming_appdata() -> Path:
+    value = os.getenv("APPDATA")
+    return Path(value) if value else Path.home() / "AppData" / "Roaming"
+
+
+def _default_codex_app_path() -> Path:
+    if os.name == "nt":
+        return _default_windows_local_appdata() / "Programs" / "Codex" / "Codex.exe"
+    return Path("/Applications/Codex.app")
+
+
+def _default_codex_user_data_dir() -> Path:
+    if os.name == "nt":
+        return _default_windows_roaming_appdata() / "Codex"
+    return Path.home() / "Library" / "Application Support" / "Codex"
+
+
+DEFAULT_CODEX_APP_PATH = _default_codex_app_path()
+DEFAULT_CODEX_USER_DATA_DIR = _default_codex_user_data_dir()
 CODEX_VSCODE_URI = "vscode://openai.chatgpt/"
 VSCODE_BUNDLE_ID = "com.microsoft.VSCode"
 CODEX_TERMINATION_TIMEOUT_SECONDS = 5.0
@@ -32,6 +56,14 @@ def is_safe_codex_user_data_dir(path: Path) -> bool:
 
 def codex_executable_path(codex_app_path: Path) -> Path:
     resolved_app = codex_app_path.expanduser().resolve()
+    if os.name == "nt":
+        if resolved_app.suffix.lower() == ".exe":
+            return resolved_app
+        for candidate_name in ("Codex.exe", "codex.exe"):
+            candidate = resolved_app / candidate_name
+            if candidate.is_file():
+                return candidate
+        return resolved_app / "Codex.exe"
     return resolved_app / "Contents" / "MacOS" / resolved_app.stem
 
 
@@ -44,6 +76,9 @@ def codex_launch_env(
 
 
 def _read_process_listing() -> list[tuple[int, str]]:
+    if os.name == "nt":
+        return _read_windows_process_listing()
+
     try:
         output = subprocess.check_output(["ps", "-Ao", "pid=,command="], text=True)
     except (OSError, subprocess.SubprocessError):
@@ -60,6 +95,35 @@ def _read_process_listing() -> list[tuple[int, str]]:
         except ValueError:
             continue
         processes.append((pid, command))
+    return processes
+
+
+def _read_windows_process_listing() -> list[tuple[int, str]]:
+    powershell = shutil.which("powershell") or shutil.which("pwsh") or "powershell"
+    script = (
+        "Get-CimInstance Win32_Process | "
+        "Select-Object ProcessId,CommandLine | "
+        "ConvertTo-Json -Compress"
+    )
+    try:
+        output = subprocess.check_output(
+            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        payload = json.loads(output or "[]")
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return []
+
+    entries = payload if isinstance(payload, list) else [payload]
+    processes: list[tuple[int, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        pid = entry.get("ProcessId")
+        command = entry.get("CommandLine")
+        if isinstance(pid, int) and isinstance(command, str) and command:
+            processes.append((pid, command))
     return processes
 
 

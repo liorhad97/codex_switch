@@ -441,6 +441,17 @@ ipcMain.handle("updater:install", async () => {
   autoUpdater.quitAndInstall();
   return updaterState;
 });
+ipcMain.handle("shell:open-external", async (_event, url) => {
+  if (typeof url !== "string") {
+    throw new Error("Missing URL");
+  }
+  const parsedUrl = new URL(url);
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+    throw new Error("Only http and https links can be opened.");
+  }
+  await shell.openExternal(parsedUrl.toString());
+  return { ok: true };
+});
 
 app.whenReady().then(async () => {
   app.setAboutPanelOptions({ applicationName: APP_NAME });

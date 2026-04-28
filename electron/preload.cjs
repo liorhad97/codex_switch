@@ -20,3 +20,7 @@ contextBridge.exposeInMainWorld("codexSwitchUpdater", {
     };
   }
 });
+
+contextBridge.exposeInMainWorld("codexSwitchShell", {
+  openExternal: (url) => ipcRenderer.invoke("shell:open-external", url)
+});

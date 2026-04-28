@@ -10,7 +10,11 @@ from uuid import uuid4
 from .account_identity import AccountIdentityService
 from .app_server import CodexAppServerConnection
 from .models import AccountRecord, OAuthFlowSnapshot
-from .profile_home import ProfileHomeManager
+from .profile_home import (
+    ProfileHomeManager,
+    clear_pending_oauth_profile,
+    mark_pending_oauth_profile,
+)
 from .store import ProfileStore
 
 
@@ -49,8 +53,14 @@ class AccountOAuthManager:
 
         account_id = str(uuid4())
         home_dir = str(self._homes.ensure_profile_home(account_id))
-        session = self._ensure_session_state(account_id=account_id, home_dir=home_dir, persisted=False)
-        session.flow = self._begin_login(session)
+        mark_pending_oauth_profile(self._homes.profile_root(account_id))
+        try:
+            session = self._ensure_session_state(account_id=account_id, home_dir=home_dir, persisted=False)
+            session.flow = self._begin_login(session)
+        except Exception:
+            self.close(account_id)
+            self._homes.delete_profile(account_id)
+            raise
         return session.flow
 
     def start(self, account: AccountRecord) -> OAuthFlowSnapshot:
@@ -62,6 +72,7 @@ class AccountOAuthManager:
             enabled=True,
             last_error=None,
             auth_mode=None,
+            oauth=asdict(session.flow),
         )
         return session.flow
 
@@ -257,6 +268,7 @@ class AccountOAuthManager:
                         enabled=False,
                         last_error=session.flow.error,
                         auth_mode=None,
+                        oauth=asdict(session.flow),
                     )
             return
 
@@ -274,6 +286,7 @@ class AccountOAuthManager:
                     enabled=False,
                     auth_mode=None,
                     last_error=None,
+                    oauth=None,
                 )
             return
 
@@ -292,20 +305,26 @@ class AccountOAuthManager:
     @staticmethod
     def _begin_login(session: _SessionState) -> OAuthFlowSnapshot:
         result = session.connection.request("account/login/start", {"type": "chatgpt"})
+        verification_uri = _string_value(result.get("authUrl"))
+        settings_url = _string_value(result.get("settingsUrl"))
+        help_url = _string_value(result.get("helpUrl"))
+        if not (verification_uri or settings_url or help_url):
+            raise RuntimeError("Codex app-server did not return a ChatGPT sign-in URL.")
         return OAuthFlowSnapshot(
             account_id=session.account_id,
             status="awaiting_browser",
-            verification_uri=result.get("authUrl"),
-            user_code=result.get("userCode"),
+            verification_uri=verification_uri,
+            user_code=_string_value(result.get("userCode")),
             error=None,
-            settings_url=result.get("settingsUrl"),
-            help_url=result.get("helpUrl"),
+            settings_url=settings_url,
+            help_url=help_url,
             transcript=[],
         )
 
     def _persist_session_account(self, session: _SessionState, *, email: str | None = None) -> None:
         identity = self._identities.read(session.home_dir)
         label = email or session.email or (identity or {}).get("email") or "Connected account"
+        clear_pending_oauth_profile(_profile_root_for_home(Path(session.home_dir)))
         account = self._store.persist_local_oauth_account(
             account_id=session.account_id,
             label=label,
@@ -325,3 +344,12 @@ def _format_account_state_error(error: Exception) -> str:
     if len(message) > 240:
         message = f"{message[:237]}..."
     return f"Usage refresh failed: {message}"
+
+
+def _profile_root_for_home(home_dir: Path) -> Path:
+    resolved_home_dir = home_dir.expanduser().resolve()
+    return resolved_home_dir.parent if resolved_home_dir.name == "home" else resolved_home_dir
+
+
+def _string_value(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None

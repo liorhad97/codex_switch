@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from codex_profile_switcher.profile_home import mark_pending_oauth_profile, sync_profile_home
 from codex_profile_switcher.store import AppPaths, ProfileStore
 
 
@@ -68,6 +69,58 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(imported[0].label, "alpha@example.com")
         self.assertEqual(imported[0].identity, {"email": "alpha@example.com"})
         self.assertEqual(imported[0].source, "managed_profile")
+
+    def test_import_skips_pending_oauth_profiles_without_auth(self) -> None:
+        profile_root = self.paths.prepared_profiles_root / "pending-temp"
+        sync_profile_home(profile_root / "home")
+        mark_pending_oauth_profile(profile_root)
+
+        imported = self.store.import_accounts()
+
+        self.assertEqual(imported, [])
+        self.assertEqual(self.store.load_accounts()[0], [])
+
+    def test_cleanup_skeleton_profiles_removes_no_auth_profiles_and_config_links(self) -> None:
+        skeleton_root = self.paths.prepared_profiles_root / "skeleton-1"
+        sync_profile_home(skeleton_root / "home")
+        self._write_auth(self.paths.prepared_profiles_root / "alpha" / "home", "alpha-token")
+        self.store.import_accounts()
+        self.paths.config_path.write_text(
+            json.dumps(
+                {
+                    "codex_app_path": "/Applications/Codex.app",
+                    "launch_profiles": {
+                        "skeleton-1": str(skeleton_root),
+                        "alpha": str(self.paths.prepared_profiles_root / "alpha"),
+                    },
+                    "last_selected_account_id": "skeleton-1",
+                    "primary_account_id": "skeleton-1",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = self.store.cleanup_skeleton_profiles()
+
+        self.assertEqual(report["removed"], ["skeleton-1"])
+        self.assertEqual(report["warnings"], [])
+        self.assertFalse(skeleton_root.exists())
+        self.assertTrue((self.paths.prepared_profiles_root / "alpha").exists())
+        accounts, config = self.store.load_accounts()
+        self.assertEqual([account.id for account in accounts], ["alpha"])
+        self.assertIsNone(config.primary_account_id)
+        self.assertIsNone(config.last_selected_account_id)
+        self.assertNotIn("skeleton-1", config.launch_profiles)
+        self.assertIn("alpha", config.launch_profiles)
+
+    def test_cleanup_skeleton_profiles_keeps_excluded_pending_profile(self) -> None:
+        profile_root = self.paths.prepared_profiles_root / "pending-temp"
+        sync_profile_home(profile_root / "home")
+
+        report = self.store.cleanup_skeleton_profiles(exclude_account_ids={"pending-temp"})
+
+        self.assertEqual(report["removed"], [])
+        self.assertTrue(profile_root.exists())
 
     def test_load_accounts_prefers_switcher_primary_not_scan_order(self) -> None:
         self._write_auth(self.paths.prepared_profiles_root / "alpha" / "home", "alpha-token")
@@ -163,6 +216,27 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(accounts[0].rate_limits["primary"]["usedPercent"], 18)
         self.assertEqual(config.primary_account_id, "oauth-local-1")
         self.assertEqual(config.launch_profiles["oauth-local-1"], account.profile_root.resolve())
+
+    def test_update_local_account_persists_oauth_snapshot(self) -> None:
+        self.store.persist_local_oauth_account(
+            account_id="oauth-local-1",
+            label="oauth@example.com",
+            home_dir=self.paths.prepared_profiles_root / "oauth-local-1" / "home",
+            auth_mode="chatgpt_oauth",
+        )
+
+        self.store.update_local_account(
+            "oauth-local-1",
+            status="pending_oauth",
+            oauth={
+                "account_id": "oauth-local-1",
+                "status": "awaiting_browser",
+                "verification_uri": "https://chat.openai.com/auth/mock",
+            },
+        )
+
+        accounts, _config = self.store.load_accounts()
+        self.assertEqual(accounts[0].oauth["verification_uri"], "https://chat.openai.com/auth/mock")
 
     def test_remove_account_deletes_snapshot_profile_and_config_links(self) -> None:
         account, _config = self.store.add_local_account("Local alpha")

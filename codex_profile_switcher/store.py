@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -10,7 +12,7 @@ from typing import Any
 
 from .launcher import DEFAULT_CODEX_APP_PATH
 from .models import AccountRecord, SwitcherConfig
-from .profile_home import codex_home_path, sync_profile_home
+from .profile_home import codex_home_path, is_pending_oauth_profile, sync_profile_home
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,6 +362,73 @@ class ProfileStore:
 
         return updated
 
+    def cleanup_skeleton_profiles(self, *, exclude_account_ids: set[str] | None = None) -> dict[str, list[str]]:
+        excluded = set(exclude_account_ids or set())
+        prepared_profiles_root = self.paths.prepared_profiles_root.expanduser().resolve()
+        accounts = self._read_accounts_snapshot()
+        accounts_by_id = {account.id: account for account in accounts}
+        removed_ids: list[str] = []
+        warnings: list[str] = []
+
+        if prepared_profiles_root.exists():
+            for profile_root in sorted(prepared_profiles_root.iterdir()):
+                if not profile_root.is_dir():
+                    continue
+                account_id = profile_root.name
+                if account_id in excluded or self._profile_root_has_auth(profile_root):
+                    continue
+                account = accounts_by_id.get(account_id)
+                if not self._is_skeleton_account(account):
+                    continue
+                try:
+                    _remove_tree(profile_root)
+                    removed_ids.append(account_id)
+                except OSError as error:
+                    warnings.append(f"Could not remove skeleton profile {account_id}: {error}")
+
+        removed_id_set = set(removed_ids)
+        rendered_accounts: list[AccountRecord] = []
+        for account in accounts:
+            if account.id in excluded:
+                rendered_accounts.append(account)
+                continue
+            if account.id in removed_id_set:
+                continue
+            profile_root = account.profile_root.expanduser().resolve()
+            if (
+                self._is_within(profile_root, prepared_profiles_root)
+                and self._is_skeleton_account(account)
+                and not self._account_has_auth(account)
+                and not profile_root.exists()
+            ):
+                removed_id_set.add(account.id)
+                removed_ids.append(account.id)
+                continue
+            rendered_accounts.append(account)
+
+        if removed_id_set:
+            self._write_accounts_snapshot(rendered_accounts)
+            config = self.load_config()
+            launch_profiles = {
+                account_id: profile_path
+                for account_id, profile_path in config.launch_profiles.items()
+                if account_id not in removed_id_set
+            }
+            self.save_config(
+                SwitcherConfig(
+                    primary_account_id=None
+                    if config.primary_account_id in removed_id_set
+                    else config.primary_account_id,
+                    last_selected_account_id=None
+                    if config.last_selected_account_id in removed_id_set
+                    else config.last_selected_account_id,
+                    codex_app_path=config.codex_app_path,
+                    launch_profiles=launch_profiles,
+                )
+            )
+
+        return {"removed": removed_ids, "warnings": warnings}
+
     def set_codex_app_path(self, config: SwitcherConfig, codex_app_path: Path) -> SwitcherConfig:
         updated = SwitcherConfig(
             primary_account_id=config.primary_account_id,
@@ -384,6 +453,7 @@ class ProfileStore:
                     "identity": account.identity,
                     "rate_limits": account.rate_limits,
                     "auth_mode": account.auth_mode,
+                    "oauth": account.oauth,
                     "last_error": account.last_error,
                     "created_at": account.created_at.isoformat() if account.created_at else None,
                     "updated_at": account.updated_at.isoformat() if account.updated_at else None,
@@ -415,6 +485,7 @@ class ProfileStore:
             identity = entry.get("identity")
             rate_limits = entry.get("rate_limits")
             auth_mode = entry.get("auth_mode")
+            oauth = entry.get("oauth")
             last_error = entry.get("last_error")
             accounts.append(
                 AccountRecord(
@@ -427,6 +498,7 @@ class ProfileStore:
                     identity=identity if isinstance(identity, dict) else None,
                     rate_limits=rate_limits if isinstance(rate_limits, dict) else None,
                     auth_mode=auth_mode if isinstance(auth_mode, str) and auth_mode else None,
+                    oauth=oauth if isinstance(oauth, dict) else None,
                     last_error=last_error if isinstance(last_error, str) and last_error else None,
                     created_at=_parse_timestamp(entry.get("created_at")),
                     updated_at=_parse_timestamp(entry.get("updated_at")),
@@ -446,6 +518,9 @@ class ProfileStore:
             if not child.is_dir():
                 continue
             home_dir = child / "home" if (child / "home").is_dir() else child
+            has_auth = (codex_home_path(home_dir) / "auth.json").is_file()
+            if is_pending_oauth_profile(child) and not has_auth:
+                continue
             synced_home_dir = sync_profile_home(home_dir)
             has_auth = (codex_home_path(synced_home_dir) / "auth.json").is_file()
             results.append(
@@ -464,6 +539,32 @@ class ProfileStore:
                 )
             )
         return results
+
+    def _account_has_auth(self, account: AccountRecord) -> bool:
+        try:
+            return (codex_home_path(account.home_dir) / "auth.json").is_file()
+        except OSError:
+            return False
+
+    def _profile_root_has_auth(self, profile_root: Path) -> bool:
+        home_dir = profile_root / "home" if (profile_root / "home").is_dir() else profile_root
+        try:
+            return (codex_home_path(home_dir) / "auth.json").is_file()
+        except OSError:
+            return False
+
+    @staticmethod
+    def _is_skeleton_account(account: AccountRecord | None) -> bool:
+        if account is None:
+            return True
+        if account.auth_mode or account.identity or account.rate_limits:
+            return False
+        if account.oauth:
+            return False
+        if account.status == "connected":
+            return False
+        source = ProfileStore._normalize_account_source(account.source)
+        return source in {"managed_profile", "local_created"} or not source
 
     def _read_json(self, path: Path) -> Any:
         if not path.exists():
@@ -686,3 +787,30 @@ def _same_file(first: Path, second: Path) -> bool:
         return first.expanduser().resolve().samefile(second.expanduser().resolve())
     except OSError:
         return first.expanduser().resolve() == second.expanduser().resolve()
+
+
+def _remove_tree(path: Path) -> None:
+    try:
+        shutil.rmtree(path, onexc=_make_writable_and_retry)
+    except TypeError:
+        shutil.rmtree(path, onerror=_make_writable_and_retry_legacy)
+
+
+def _make_writable_and_retry(function: Any, path: str, exc_info: BaseException) -> None:
+    del exc_info
+    _chmod_writable(Path(path))
+    function(path)
+
+
+def _make_writable_and_retry_legacy(function: Any, path: str, exc_info: Any) -> None:
+    del exc_info
+    _chmod_writable(Path(path))
+    function(path)
+
+
+def _chmod_writable(path: Path) -> None:
+    try:
+        current_mode = path.stat().st_mode
+        os.chmod(path, current_mode | stat.S_IWRITE | stat.S_IREAD)
+    except OSError:
+        pass

@@ -43,18 +43,26 @@ class CodexAppServerConnection:
 
             env = os.environ.copy()
             env.setdefault("HOME", str(Path.home()))
+            env.setdefault("USERPROFILE", str(Path.home()))
             sync_profile_home(self._home_dir)
             env["CODEX_HOME"] = str(codex_home_path(self._home_dir))
-            process = subprocess.Popen(
-                [self._codex_binary, "app-server"],
-                cwd=self._workspace_root,
-                env=env,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-            )
+            try:
+                process = subprocess.Popen(
+                    [self._codex_binary, "app-server"],
+                    cwd=self._workspace_root,
+                    env=env,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                )
+            except OSError as error:
+                raise RuntimeError(
+                    "Could not start Codex app-server. Install Codex, make sure the codex CLI is on PATH, "
+                    "or set CODEX_BINARY to the codex executable path. "
+                    f"Tried: {self._codex_binary}. {error}"
+                ) from error
             self._process = process
             self._started = True
 

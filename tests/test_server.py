@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
+import threading
 import unittest
 from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import patch
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
-from codex_profile_switcher.models import OAuthFlowSnapshot
+from codex_profile_switcher.models import OAuthFlowSnapshot, SwitcherConfig
 from codex_profile_switcher.server import (
     SwitcherServer,
     _FLUTTY_LIVE_STATE_CACHE,
+    _list_codex_switch_backend_processes,
     _resolve_codex_binary,
 )
 from codex_profile_switcher.store import AppPaths, ProfileStore
@@ -27,6 +32,7 @@ class FakeOAuthManager:
         self.persist_account_flags: list[bool] = []
         self.cancelled_account_ids: list[str] = []
         self.cancelled_pending = False
+        self.start_error: Exception | None = None
 
     def get_pending_flow(self) -> OAuthFlowSnapshot | None:
         return self.pending_flow
@@ -48,6 +54,8 @@ class FakeOAuthManager:
         return self.cached_by_account_id.get(account.id, {})
 
     def start_temporary(self) -> OAuthFlowSnapshot:
+        if self.start_error is not None:
+            raise self.start_error
         if self.pending_flow is None:
             self.pending_flow = OAuthFlowSnapshot(
                 account_id="temp-account-1",
@@ -237,6 +245,39 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertTrue(oauth_manager.cancelled_pending)
         self.assertIsNone(payload["pending_oauth_flow"])
 
+    def test_add_account_endpoint_returns_json_error_when_oauth_start_fails(self) -> None:
+        oauth_manager = FakeOAuthManager()
+        oauth_manager.start_error = RuntimeError("Codex app-server did not return a ChatGPT sign-in URL.")
+        server = SwitcherServer(
+            ("127.0.0.1", 0),
+            static_root=self.static_root,
+            store=self.store,
+            oauth_manager=oauth_manager,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = urllib_request.Request(
+                f"http://127.0.0.1:{server.server_address[1]}/api/accounts/add",
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(urllib_error.HTTPError) as raised:
+                urllib_request.urlopen(request, timeout=2)
+            error_response = raised.exception
+            try:
+                payload = json.loads(error_response.read().decode("utf-8"))
+            finally:
+                error_response.close()
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+
+        self.assertEqual(raised.exception.code, 500)
+        self.assertEqual(payload["error"], "Codex app-server did not return a ChatGPT sign-in URL.")
+
     def test_remove_account_clears_selection_and_deletes_profile(self) -> None:
         account, _config = self.store.add_local_account("Local alpha")
         oauth_manager = FakeOAuthManager(store=self.store)
@@ -323,6 +364,8 @@ class SwitcherServerTests(unittest.TestCase):
 
     def test_fix_common_issues_clears_cache_refreshes_accounts_and_stops_stale_backends(self) -> None:
         self._write_auth(self.paths.prepared_profiles_root / "alpha" / "home")
+        skeleton_root = self.paths.prepared_profiles_root / "skeleton-1"
+        (skeleton_root / "home" / ".codex").mkdir(parents=True)
         _FLUTTY_LIVE_STATE_CACHE.update(
             {
                 "api_base": "http://127.0.0.1:9999",
@@ -358,8 +401,10 @@ class SwitcherServerTests(unittest.TestCase):
         terminate_process.assert_called_once_with(stale_pid)
         self.assertEqual(_FLUTTY_LIVE_STATE_CACHE["accounts"], {})
         self.assertIn("Cleared cached live usage state.", payload["fixed"])
+        self.assertIn("Removed 1 skeleton profile: skeleton-1.", payload["fixed"])
         self.assertIn("Refreshed account discovery snapshot.", payload["fixed"])
         self.assertIn(f"Stopped stale backend process {stale_pid} on port 8765.", payload["fixed"])
+        self.assertFalse(skeleton_root.exists())
         self.assertEqual(payload["state"]["accounts"][0]["id"], "alpha")
 
     def test_cancel_account_sign_in_marks_local_account_disconnected(self) -> None:
@@ -481,6 +526,59 @@ class SwitcherServerTests(unittest.TestCase):
             patch("codex_profile_switcher.server.shutil.which", return_value=None),
         ):
             self.assertEqual(_resolve_codex_binary(self.store), str(binary_path.resolve()))
+
+    def test_resolve_codex_binary_uses_windows_resources_binary(self) -> None:
+        app_path = self.root / "Programs" / "Codex" / "Codex.exe"
+        binary_path = app_path.parent / "resources" / "codex.exe"
+        binary_path.parent.mkdir(parents=True)
+        app_path.write_text("gui", encoding="utf-8")
+        binary_path.write_text("cli", encoding="utf-8")
+        config = SwitcherConfig(
+            primary_account_id=None,
+            last_selected_account_id=None,
+            codex_app_path=app_path,
+            launch_profiles={},
+        )
+
+        with (
+            patch.dict(os.environ, {"CODEX_BINARY": "", "LOCALAPPDATA": str(self.root)}, clear=False),
+            patch("codex_profile_switcher.server._is_windows", return_value=True),
+            patch("codex_profile_switcher.server.shutil.which", return_value=None),
+            patch.object(self.store, "load_config", return_value=config),
+        ):
+            self.assertEqual(_resolve_codex_binary(self.store), str(binary_path.resolve()))
+
+    def test_list_backend_processes_parses_windows_process_listing(self) -> None:
+        output = json.dumps(
+            [
+                {
+                    "ProcessId": 111,
+                    "ParentProcessId": 1,
+                    "CommandLine": "C:\\\\Other\\\\python.exe unrelated.py",
+                },
+                {
+                    "ProcessId": 222,
+                    "ParentProcessId": 1,
+                    "CommandLine": (
+                        "C:\\\\Program Files\\\\codex switch\\\\resources\\\\backend\\\\codex-switch-backend.exe "
+                        "--host 127.0.0.1 --port 8765 --static-root C:\\\\Users\\\\Me\\\\AppData\\\\Local\\\\Temp"
+                    ),
+                },
+            ]
+        )
+
+        with (
+            patch("codex_profile_switcher.server._is_windows", return_value=True),
+            patch("codex_profile_switcher.server.shutil.which", return_value="powershell"),
+            patch("codex_profile_switcher.server.subprocess.check_output", return_value=output),
+        ):
+            processes = _list_codex_switch_backend_processes()
+
+        self.assertEqual(len(processes), 1)
+        self.assertEqual(processes[0]["pid"], 222)
+        self.assertEqual(processes[0]["ppid"], 1)
+        self.assertEqual(processes[0]["host"], "127.0.0.1")
+        self.assertEqual(processes[0]["port"], 8765)
 
     def _write_auth(self, home_dir: Path) -> Path:
         auth_path = home_dir / ".codex" / "auth.json"

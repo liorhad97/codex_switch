@@ -29,6 +29,10 @@ from .profile_home import codex_home_path
 from .store import ProfileStore
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 _FLUTTY_LIVE_STATE_CACHE: dict[str, Any] = {
     "api_base": None,
     "accounts": {},
@@ -90,7 +94,14 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
         if self.path == "/api/accounts/add":
             payload = self._read_json_body()
             label = payload.get("label")
-            flow = self.switcher.start_pending_account(label=label if isinstance(label, str) else None)
+            try:
+                flow = self.switcher.start_pending_account(label=label if isinstance(label, str) else None)
+            except Exception as error:  # noqa: BLE001
+                self._send_json(
+                    {"error": str(error).strip() or "Could not start ChatGPT sign-in."},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
             response = self.switcher.build_state()
             response.update(
                 {
@@ -279,6 +290,13 @@ class SwitcherServer(ThreadingHTTPServer):
 
     def build_state(self, *, refresh_usage: bool = False) -> dict[str, Any]:
         accounts, config = self.store.load_accounts()
+        pending_flow = self.oauth.get_pending_flow()
+        if pending_flow is not None:
+            accounts = [
+                account
+                for account in accounts
+                if account.id != pending_flow.account_id or account.source.startswith("local_")
+            ]
         selected = self._selected_account_id or config.last_selected_account_id or config.primary_account_id
         if selected and all(account.id != selected for account in accounts):
             selected = accounts[0].id if accounts else None
@@ -311,7 +329,6 @@ class SwitcherServer(ThreadingHTTPServer):
                 account.auth_mode = auth_mode
             if isinstance(oauth, dict):
                 account.oauth = oauth
-        pending_flow = self.oauth.get_pending_flow()
         return {
             "accounts": [_serialize_account(account) for account in accounts],
             "selected_account_id": selected,
@@ -362,6 +379,24 @@ class SwitcherServer(ThreadingHTTPServer):
 
         _reset_live_state_cache()
         fixed.append("Cleared cached live usage state.")
+
+        pending_flow = self.oauth.get_pending_flow()
+        excluded_skeleton_ids = {pending_flow.account_id} if pending_flow is not None else set()
+        try:
+            skeleton_report = self.store.cleanup_skeleton_profiles(exclude_account_ids=excluded_skeleton_ids)
+            removed_skeletons = skeleton_report["removed"]
+            if removed_skeletons:
+                fixed.append(
+                    "Removed "
+                    f"{len(removed_skeletons)} skeleton profile"
+                    f"{'' if len(removed_skeletons) == 1 else 's'}: "
+                    f"{', '.join(removed_skeletons)}."
+                )
+            else:
+                checks.append("No skeleton profiles needed cleanup.")
+            warnings.extend(skeleton_report["warnings"])
+        except Exception as error:  # noqa: BLE001
+            warnings.append(f"Skeleton profile cleanup failed: {error}")
 
         try:
             self.store.import_accounts()
@@ -531,19 +566,73 @@ def _resolve_codex_binary(store: ProfileStore) -> str:
 
     candidates: list[Path] = []
     try:
-        candidates.append(store.load_config().codex_app_path / "Contents" / "Resources" / "codex")
+        candidates.extend(_codex_app_server_candidates(store.load_config().codex_app_path))
     except (OSError, ValueError):
         pass
-    candidates.append(Path("/Applications/Codex.app/Contents/Resources/codex"))
 
     for candidate in candidates:
         try:
-            if candidate.is_file() and os.access(candidate, os.X_OK):
+            if candidate.is_file() and (_is_windows() or os.access(candidate, os.X_OK)):
                 return str(candidate)
         except OSError:
             continue
 
+    if _is_windows():
+        return "codex.exe"
     return "codex"
+
+
+def _codex_app_server_candidates(codex_app_path: Path) -> list[Path]:
+    configured = codex_app_path.expanduser().resolve()
+    candidates: list[Path] = []
+    if _is_windows():
+        configured_dir = configured.parent if configured.suffix.lower() == ".exe" else configured
+        candidates.extend(
+            [
+                configured_dir / "resources" / "codex.exe",
+                configured_dir / "resources" / "bin" / "codex.exe",
+                configured_dir / "resources" / "app" / "codex.exe",
+                configured_dir / "codex.exe",
+            ]
+        )
+        for root in _windows_program_roots():
+            candidates.extend(
+                [
+                    root / "Programs" / "Codex" / "resources" / "codex.exe",
+                    root / "Programs" / "Codex" / "resources" / "bin" / "codex.exe",
+                    root / "Programs" / "Codex" / "codex.exe",
+                    root / "Codex" / "resources" / "codex.exe",
+                    root / "Codex" / "codex.exe",
+                ]
+            )
+        return _dedupe_paths(candidates)
+
+    candidates.append(configured / "Contents" / "Resources" / "codex")
+    candidates.append(Path("/Applications/Codex.app/Contents/Resources/codex"))
+    return _dedupe_paths(candidates)
+
+
+def _windows_program_roots() -> list[Path]:
+    roots: list[Path] = []
+    for env_name in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
+        value = os.getenv(env_name)
+        if value:
+            roots.append(Path(value))
+    if not roots:
+        roots.append(Path.home() / "AppData" / "Local")
+    return roots
+
+
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    deduped: list[Path] = []
+    for path in paths:
+        key = str(path).casefold() if _is_windows() else str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(path)
+    return deduped
 
 
 def _merge_live_state(
@@ -622,7 +711,7 @@ def _detect_flutty_api_base() -> str | None:
     if explicit:
         return explicit.rstrip("/")
 
-    if os.name == "nt":
+    if _is_windows():
         return None
 
     try:
@@ -639,8 +728,8 @@ def _detect_flutty_api_base() -> str | None:
 
 
 def _list_codex_switch_backend_processes() -> list[dict[str, Any]]:
-    if os.name == "nt":
-        return []
+    if _is_windows():
+        return _list_codex_switch_backend_processes_windows()
 
     try:
         output = subprocess.check_output(["ps", "-axo", "pid=,ppid=,command="], text=True)
@@ -659,6 +748,50 @@ def _list_codex_switch_backend_processes() -> list[dict[str, Any]]:
             pid = int(pid_text)
             ppid = int(ppid_text)
         except ValueError:
+            continue
+        processes.append(
+            {
+                "pid": pid,
+                "ppid": ppid,
+                "command": command,
+                "host": _process_arg_value(command, "--host"),
+                "port": _process_arg_int(command, "--port"),
+                "static_root": _process_arg_value(command, "--static-root"),
+            }
+        )
+    return processes
+
+
+def _list_codex_switch_backend_processes_windows() -> list[dict[str, Any]]:
+    powershell = shutil.which("powershell") or shutil.which("pwsh") or "powershell"
+    script = (
+        "Get-CimInstance Win32_Process | "
+        "Select-Object ProcessId,ParentProcessId,CommandLine | "
+        "ConvertTo-Json -Compress"
+    )
+    try:
+        output = subprocess.check_output(
+            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        payload = json.loads(output or "[]")
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return []
+
+    entries = payload if isinstance(payload, list) else [payload]
+    processes: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        command = entry.get("CommandLine")
+        if not isinstance(command, str):
+            continue
+        if "codex_profile_switcher.server" not in command and "codex-switch-backend" not in command:
+            continue
+        pid = _int_value(entry.get("ProcessId"))
+        ppid = _int_value(entry.get("ParentProcessId"))
+        if pid is None or ppid is None:
             continue
         processes.append(
             {
@@ -694,6 +827,17 @@ def _process_arg_int(command: str, name: str) -> int | None:
         return None
 
 
+def _int_value(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _terminate_stale_backend_processes(*, current_pid: int, current_port: int) -> dict[str, list[str]]:
     checks: list[str] = []
     fixed: list[str] = []
@@ -723,6 +867,15 @@ def _terminate_stale_backend_processes(*, current_pid: int, current_port: int) -
 
 def _terminate_process_tree(pid: int) -> None:
     if pid <= 0 or pid == os.getpid():
+        return
+    if _is_windows():
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            check=False,
+        )
         return
     os.kill(pid, signal.SIGTERM)
     deadline = time.monotonic() + 1.5

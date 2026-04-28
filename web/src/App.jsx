@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 const USAGE_REFRESH_INTERVAL_MS = 60_000;
 const updaterBridge = typeof window !== "undefined" ? window.codexSwitchUpdater || null : null;
+const shellBridge = typeof window !== "undefined" ? window.codexSwitchShell || null : null;
 
 async function request(path, options = {}) {
   const response = await fetch(path, {
@@ -343,7 +344,7 @@ function SignInPanel({ flow, onOpen, onCancel, cancelBusy = false }) {
             <button
               type="button"
               className="relay-account-action relay-account-action-primary"
-              onClick={() => onOpen(oauthUrl)}
+              onClick={() => void onOpen(oauthUrl)}
             >
               Open Sign-In Link
             </button>
@@ -743,8 +744,16 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, [pendingOAuthFlow?.account_id, pendingOAuthFlow?.status, selectedOauthFlow?.account_id, selectedOauthFlow?.status]);
 
-  const openExternal = (url) => {
-    window.open(url, "_blank", "noopener,noreferrer");
+  const openExternal = async (url) => {
+    try {
+      if (shellBridge?.openExternal) {
+        await shellBridge.openExternal(url);
+        return;
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setFeedback(err.message || "Could not open the sign-in link.");
+    }
   };
 
   const selectAccount = async (accountId) => {
