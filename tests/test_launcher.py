@@ -118,17 +118,18 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(wait_for_exit.call_count, 2)
 
     def test_launch_codex_restarts_existing_instance_before_reopening(self) -> None:
-        executable = codex_executable_path(DEFAULT_CODEX_APP_PATH)
+        command = ["codex-test"]
         with (
             patch("codex_profile_switcher.launcher.terminate_running_codex") as terminate_running,
-            patch("codex_profile_switcher.launcher._windows_codex_app_id", return_value=None),
+            patch("codex_profile_switcher.launcher.build_codex_launch_command", return_value=command) as build_command,
             patch("subprocess.Popen") as popen,
         ):
             launch_codex(DEFAULT_CODEX_APP_PATH)
 
         terminate_running.assert_called_once_with(DEFAULT_CODEX_APP_PATH)
+        build_command.assert_called_once_with(DEFAULT_CODEX_APP_PATH)
         popen.assert_called_once()
-        self.assertEqual(popen.call_args.args[0], [str(executable)])
+        self.assertEqual(popen.call_args.args[0], command)
 
     def test_build_codex_launch_command_uses_windows_store_app_id_for_appx(self) -> None:
         appx_executable = Path(
@@ -185,6 +186,7 @@ class LauncherTests(unittest.TestCase):
 
     def test_launch_codex_vscode_extension_restarts_vscode_and_opens_extension_uri(self) -> None:
         with (
+            patch("codex_profile_switcher.launcher.os.name", "posix"),
             patch("codex_profile_switcher.launcher.terminate_running_vscode") as terminate_vscode,
             patch("subprocess.Popen") as popen,
         ):
