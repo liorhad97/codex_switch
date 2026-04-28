@@ -213,6 +213,10 @@ jobs:
         shell: pwsh
         run: ./scripts/windows-packaged-smoke.ps1
 
+      - name: Smoke test Windows Electron UI from zip
+        if: runner.os == 'Windows'
+        run: node scripts/windows-electron-ui-smoke.cjs
+
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
