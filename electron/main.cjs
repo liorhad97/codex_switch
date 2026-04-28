@@ -10,6 +10,8 @@ const APP_NAME = "codex switch";
 const BACKEND_HOST = process.env.CODEX_SWITCH_HOST || "127.0.0.1";
 const DEFAULT_BACKEND_PORT = Number.parseInt(process.env.CODEX_SWITCH_PORT || "8765", 10) || 8765;
 const EXTERNAL_BACKEND_URL = process.env.CODEX_SWITCH_URL || null;
+const FORCE_OWN_BACKEND =
+  process.env.CODEX_SWITCH_FORCE_OWN_BACKEND === "1" || (!app.isPackaged && !EXTERNAL_BACKEND_URL);
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const PRELOAD_PATH = path.join(__dirname, "preload.cjs");
 let backendProcess = null;
@@ -29,7 +31,9 @@ let updaterState = {
 };
 
 const hasSingleInstanceLock =
-  process.env.CODEX_SWITCH_ALLOW_MULTI_INSTANCE === "1" ? true : app.requestSingleInstanceLock();
+  process.env.CODEX_SWITCH_ALLOW_MULTI_INSTANCE === "1" || FORCE_OWN_BACKEND
+    ? true
+    : app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) {
   app.quit();
@@ -332,12 +336,12 @@ async function resolveBackendTarget() {
     return { url: EXTERNAL_BACKEND_URL, port: null, shouldSpawn: false };
   }
 
-  if (activeBackendUrl && await checkBackendHealth(activeBackendUrl)) {
+  if (!FORCE_OWN_BACKEND && activeBackendUrl && await checkBackendHealth(activeBackendUrl)) {
     return { url: activeBackendUrl, port: activeBackendPort, shouldSpawn: false };
   }
 
   const preferredUrl = `http://${BACKEND_HOST}:${DEFAULT_BACKEND_PORT}`;
-  if (await checkBackendHealth(preferredUrl)) {
+  if (!FORCE_OWN_BACKEND && await checkBackendHealth(preferredUrl)) {
     activeBackendUrl = preferredUrl;
     activeBackendPort = DEFAULT_BACKEND_PORT;
     return { url: preferredUrl, port: DEFAULT_BACKEND_PORT, shouldSpawn: false };
@@ -389,7 +393,15 @@ async function createWindow() {
     return { action: "deny" };
   });
 
-  await mainWindow.loadURL(backendTarget.url);
+  if (!app.isPackaged) {
+    await mainWindow.webContents.session.clearCache().catch(() => {});
+    await mainWindow.webContents.session
+      .clearStorageData({ storages: ["appcache", "cachestorage", "serviceworkers"] })
+      .catch(() => {});
+  }
+
+  const loadUrl = app.isPackaged ? backendTarget.url : `${backendTarget.url}?dev=${Date.now()}`;
+  await mainWindow.loadURL(loadUrl);
   sendUpdaterState();
   initializeAutoUpdater();
 }

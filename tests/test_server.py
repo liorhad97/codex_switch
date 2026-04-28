@@ -8,7 +8,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from codex_profile_switcher.models import OAuthFlowSnapshot
-from codex_profile_switcher.server import SwitcherServer, _resolve_codex_binary
+from codex_profile_switcher.server import (
+    SwitcherServer,
+    _FLUTTY_LIVE_STATE_CACHE,
+    _resolve_codex_binary,
+)
 from codex_profile_switcher.store import AppPaths, ProfileStore
 
 
@@ -316,6 +320,47 @@ class SwitcherServerTests(unittest.TestCase):
             server.server_close()
 
         self.assertEqual(payload["accounts"][0]["last_error"], "Usage refresh failed: token invalidated")
+
+    def test_fix_common_issues_clears_cache_refreshes_accounts_and_stops_stale_backends(self) -> None:
+        self._write_auth(self.paths.prepared_profiles_root / "alpha" / "home")
+        _FLUTTY_LIVE_STATE_CACHE.update(
+            {
+                "api_base": "http://127.0.0.1:9999",
+                "accounts": {"alpha": {"id": "alpha"}},
+                "fetched_at": 10.0,
+                "cooldown_until": 20.0,
+            }
+        )
+        oauth_manager = FakeOAuthManager()
+        server = SwitcherServer(
+            ("127.0.0.1", 0),
+            static_root=self.static_root,
+            store=self.store,
+            oauth_manager=oauth_manager,
+        )
+        current_pid = os.getpid()
+        stale_pid = current_pid + 1000
+        try:
+            with (
+                patch(
+                    "codex_profile_switcher.server._list_codex_switch_backend_processes",
+                    return_value=[
+                        {"pid": current_pid, "ppid": 1, "command": "current", "port": server.server_address[1]},
+                        {"pid": stale_pid, "ppid": 1, "command": "stale", "port": 8765},
+                    ],
+                ),
+                patch("codex_profile_switcher.server._terminate_process_tree") as terminate_process,
+            ):
+                payload = server.fix_common_issues()
+        finally:
+            server.server_close()
+
+        terminate_process.assert_called_once_with(stale_pid)
+        self.assertEqual(_FLUTTY_LIVE_STATE_CACHE["accounts"], {})
+        self.assertIn("Cleared cached live usage state.", payload["fixed"])
+        self.assertIn("Refreshed account discovery snapshot.", payload["fixed"])
+        self.assertIn(f"Stopped stale backend process {stale_pid} on port 8765.", payload["fixed"])
+        self.assertEqual(payload["state"]["accounts"][0]["id"], "alpha")
 
     def test_cancel_account_sign_in_marks_local_account_disconnected(self) -> None:
         self.store.persist_local_oauth_account(

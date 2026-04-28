@@ -284,6 +284,15 @@ function formatCheckedAtDisplay(value) {
   return `Checked ${date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 
+function GearIcon() {
+  return (
+    <svg className="relay-gear-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 2.8v2.3M12 18.9v2.3M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2.8 12h2.3M18.9 12h2.3M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" />
+    </svg>
+  );
+}
+
 function UsageStat({ label, window }) {
   return (
     <section className="relay-usage-stat">
@@ -373,27 +382,34 @@ function AccountCard({ account, selected, recommended, onSelect }) {
   );
 }
 
-function UpdatePanel({ updateState, busyKey, onDownload, onInstall }) {
-  if (!updateState?.supported || !updateState?.configured) {
-    return null;
-  }
-
-  const checkedAt = formatCheckedAtDisplay(updateState.checkedAt);
+function UpdatePanel({ updateState, busyKey, onCheck, onDownload, onInstall }) {
+  const supported = Boolean(updateState?.supported && updateState?.configured);
+  const checkedAt = formatCheckedAtDisplay(updateState?.checkedAt);
+  const checking = busyKey === "check-update" || updateState?.phase === "checking";
+  const updateBusy =
+    checking ||
+    busyKey === "download-update" ||
+    busyKey === "install-update" ||
+    updateState?.phase === "downloading";
+  const checkDisabled = !supported || updateBusy;
+  const message = updateState
+    ? updateState.message || "Check for updates."
+    : "Loading update status...";
   let actionLabel = null;
   let action = null;
   let disabled = false;
 
-  if (busyKey === "download-update" || updateState.phase === "downloading") {
-    const progress = typeof updateState.progressPercent === "number" ? ` ${Math.round(updateState.progressPercent)}%` : "";
+  if (busyKey === "download-update" || updateState?.phase === "downloading") {
+    const progress = typeof updateState?.progressPercent === "number" ? ` ${Math.round(updateState.progressPercent)}%` : "";
     actionLabel = `Downloading...${progress}`;
     disabled = true;
   } else if (busyKey === "install-update") {
     actionLabel = "Restarting...";
     disabled = true;
-  } else if (updateState.phase === "available") {
+  } else if (updateState?.phase === "available") {
     actionLabel = updateState.version ? `Download ${updateState.version}` : "Download Update";
     action = onDownload;
-  } else if (updateState.phase === "downloaded") {
+  } else if (updateState?.phase === "downloaded") {
     actionLabel = "Restart to Update";
     action = onInstall;
   }
@@ -403,11 +419,20 @@ function UpdatePanel({ updateState, busyKey, onDownload, onInstall }) {
       <div className="relay-update-head">
         <div>
           <p className="relay-usage-stat-label">App Update</p>
-          <p className="relay-update-message">{updateState.message || "Check for updates."}</p>
+          <p className="relay-update-message">{message}</p>
         </div>
-        {updateState.version ? <span className="relay-pill relay-pill-recommended">v{updateState.version}</span> : null}
+        {updateState?.version ? <span className="relay-pill relay-pill-recommended">v{updateState.version}</span> : null}
       </div>
       <div className="relay-update-actions">
+        <button
+          type="button"
+          className="relay-account-action relay-account-action-primary"
+          onClick={onCheck}
+          disabled={checkDisabled}
+          title={!supported ? message : undefined}
+        >
+          {checking ? "Checking..." : "Check Updates"}
+        </button>
         {actionLabel ? (
           <button
             type="button"
@@ -424,12 +449,137 @@ function UpdatePanel({ updateState, busyKey, onDownload, onInstall }) {
   );
 }
 
+function MaintenancePanel({ busyKey, repairResult, onFix }) {
+  const fixing = busyKey === "fix-common-issues";
+  const fixedCount = repairResult?.fixed?.length || 0;
+  const warningCount = repairResult?.warnings?.length || 0;
+  const summary = repairResult
+    ? warningCount > 0
+      ? `Scan finished with ${warningCount} warning${warningCount === 1 ? "" : "s"}.`
+      : `Scan finished. ${fixedCount} item${fixedCount === 1 ? "" : "s"} fixed.`
+    : null;
+
+  return (
+    <section className="relay-usage-stat relay-maintenance-panel">
+      <div>
+        <p className="relay-usage-stat-label">Maintenance</p>
+        {summary ? <p className="relay-update-message">{summary}</p> : null}
+      </div>
+      <button
+        type="button"
+        className="relay-account-action relay-account-action-primary"
+        onClick={onFix}
+        disabled={fixing}
+      >
+        {fixing ? "Fixing..." : "Fix Common Switch Issues"}
+      </button>
+    </section>
+  );
+}
+
+function SettingsPopover({
+  open,
+  updateState,
+  busyKey,
+  repairResult,
+  onCheck,
+  onDownload,
+  onInstall,
+  onFixCommonIssues,
+  onClose
+}) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="relay-popover-layer relay-settings-layer" onClick={onClose}>
+      <section
+        id="settings-popover"
+        className="relay-floating-panel relay-settings-popover"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="relay-popover-head">
+          <div>
+            <p className="relay-main-label">Settings</p>
+            <h2 id="settings-title" className="relay-popover-title">App Controls</h2>
+          </div>
+          <button
+            type="button"
+            className="relay-panel-close"
+            onClick={onClose}
+            aria-label="Close settings"
+            title="Close settings"
+          >
+            X
+          </button>
+        </div>
+        <UpdatePanel
+          updateState={updateState}
+          busyKey={busyKey}
+          onCheck={onCheck}
+          onDownload={onDownload}
+          onInstall={onInstall}
+        />
+        <MaintenancePanel
+          busyKey={busyKey}
+          repairResult={repairResult}
+          onFix={onFixCommonIssues}
+        />
+      </section>
+    </div>
+  );
+}
+
+function PendingSignInOverlay({ flow, onOpen, onCancel, cancelBusy = false }) {
+  if (!flow) {
+    return null;
+  }
+
+  return (
+    <div className="relay-popover-layer relay-signin-layer">
+      <div
+        className="relay-signin-window"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add account sign-in"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <SignInPanel
+          flow={flow}
+          onOpen={onOpen}
+          onCancel={onCancel}
+          cancelBusy={cancelBusy}
+        />
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState(null);
   const [feedback, setFeedback] = useState("");
-  const [updateState, setUpdateState] = useState(null);
+  const [updateState, setUpdateState] = useState(() =>
+    updaterBridge
+      ? null
+      : {
+          supported: false,
+          configured: false,
+          phase: "unavailable",
+          version: null,
+          progressPercent: null,
+          message: "Automatic updates are available only in the installed desktop app.",
+          checkedAt: null
+        }
+  );
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [signInWidgetOpen, setSignInWidgetOpen] = useState(false);
+  const [repairResult, setRepairResult] = useState(null);
   const usagePollRef = useRef({ token: 0, timeouts: [] });
 
   const stopUsagePolling = () => {
@@ -523,6 +673,10 @@ function App() {
   const selectedOauthFlow = selectedAccount?.oauth || null;
   const selectedOauthUrl = getOauthUrl(selectedOauthFlow);
   const selectedUsageWindows = getUsageWindows(selectedAccount);
+
+  useEffect(() => {
+    setSignInWidgetOpen(Boolean(pendingOAuthFlow));
+  }, [pendingOAuthFlow?.account_id]);
 
   useEffect(() => {
     if (!selectedAccount || selectedHasUsage) {
@@ -651,12 +805,42 @@ function App() {
     await runAction("import", () => request("/api/import", { method: "POST" }));
   };
 
-  const addAccount = async () => {
+  const fixCommonSwitchIssues = async () => {
+    setBusyKey("fix-common-issues");
     try {
-      const payload = await runAction("add-account", () =>
+      const payload = await request("/api/diagnostics/fix", { method: "POST" });
+      if (payload.state) {
+        setState(payload.state);
+      }
+      setRepairResult(payload);
+      const fixedCount = payload.fixed?.length || 0;
+      const warningCount = payload.warnings?.length || 0;
+      setFeedback(
+        warningCount > 0
+          ? `Common issue scan finished with ${warningCount} warning${warningCount === 1 ? "" : "s"}.`
+          : `Common issue scan finished. ${fixedCount} item${fixedCount === 1 ? "" : "s"} fixed.`
+      );
+    } catch (err) {
+      setRepairResult({ ok: false, fixed: [], checks: [], warnings: [err.message] });
+      setFeedback(err.message);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const addAccount = async () => {
+    if (pendingOAuthFlow) {
+      setSignInWidgetOpen(true);
+      setFeedback("Sign-in is already waiting. Finish it in the pop-up widget.");
+      return;
+    }
+
+    try {
+      await runAction("add-account", () =>
         request("/api/accounts/add", { method: "POST", body: JSON.stringify({}) })
       );
-      setFeedback("Sign-in started. Finish it in the browser panel.");
+      setSignInWidgetOpen(true);
+      setFeedback("Sign-in started. Finish it in the pop-up widget.");
     } catch {
       // Error is already surfaced in state.
     }
@@ -752,16 +936,28 @@ function App() {
 
   const codexDesktopBusy = busyKey === `launch-desktop:${selectedAccount?.id}`;
   const vscodeBusy = busyKey === `launch-vscode:${selectedAccount?.id}`;
-  const canCheckUpdates = Boolean(updaterBridge && updateState?.supported && updateState?.configured);
-  const checkingUpdates = busyKey === "check-update" || updateState?.phase === "checking";
-  const updateActionBusy =
-    checkingUpdates ||
-    busyKey === "download-update" ||
-    busyKey === "install-update" ||
-    updateState?.phase === "downloading";
+  const updateNeedsAttention = updateState?.phase === "available" || updateState?.phase === "downloaded";
 
   return (
     <div className="app-frame" aria-busy={loading}>
+      <button
+        type="button"
+        className={[
+          "relay-header-button",
+          "relay-gear-button",
+          "relay-app-gear-button",
+          settingsOpen ? "is-open" : "",
+          updateNeedsAttention ? "has-alert" : ""
+        ].join(" ")}
+        onClick={() => setSettingsOpen((open) => !open)}
+        aria-expanded={settingsOpen}
+        aria-haspopup="dialog"
+        aria-controls={settingsOpen ? "settings-popover" : undefined}
+        aria-label={settingsOpen ? "Close settings" : "Open settings"}
+        title="Settings"
+      >
+        <GearIcon />
+      </button>
       <div className="app-shell">
         <aside className="relay-sidebar">
           <div className="relay-sidebar-header">
@@ -774,12 +970,12 @@ function App() {
                 type="button"
                 className="relay-header-button relay-header-button-primary"
                 onClick={addAccount}
-                disabled={busyKey === "add-account" || pendingOAuthFlow?.status === "awaiting_browser"}
+                disabled={busyKey === "add-account"}
               >
                 {busyKey === "add-account"
                   ? "Starting..."
-                  : pendingOAuthFlow?.status === "awaiting_browser"
-                    ? "Waiting..."
+                  : pendingOAuthFlow
+                    ? "Resume Sign-In"
                     : "Add Account"}
               </button>
               <button
@@ -798,25 +994,7 @@ function App() {
               >
                 {busyKey === `select:${recommendedAccount?.id}` ? "Choosing..." : "Pick Best"}
               </button>
-              <button
-                type="button"
-                className="relay-header-button"
-                onClick={checkForUpdates}
-                disabled={!canCheckUpdates || updateActionBusy}
-                title={!canCheckUpdates ? updateState?.message || "Automatic updates are available in packaged builds." : undefined}
-              >
-                {checkingUpdates ? "Checking..." : "Check Updates"}
-              </button>
             </div>
-
-            {pendingOAuthFlow ? (
-              <SignInPanel
-                flow={pendingOAuthFlow}
-                onOpen={openExternal}
-                onCancel={cancelPendingSignIn}
-                cancelBusy={busyKey === "cancel-pending-oauth"}
-              />
-            ) : null}
           </div>
 
           <div className="relay-sidebar-body">
@@ -825,13 +1003,6 @@ function App() {
             {!loading && accounts.length === 0 ? (
               <p className="relay-empty-copy">No accounts found yet. Use Add Account or Refresh.</p>
             ) : null}
-
-            <UpdatePanel
-              updateState={updateState}
-              busyKey={busyKey}
-              onDownload={downloadUpdate}
-              onInstall={installUpdate}
-            />
 
             <div className="relay-account-list">
               {accounts.map((account) => (
@@ -952,21 +1123,29 @@ function App() {
               </div>
             </>
           ) : (
-            pendingOAuthFlow ? (
-              <SignInPanel
-                flow={pendingOAuthFlow}
-                onOpen={openExternal}
-                onCancel={cancelPendingSignIn}
-                cancelBusy={busyKey === "cancel-pending-oauth"}
-              />
-            ) : (
-              <section className="relay-usage-stat relay-usage-stat-full">
-                <p className="relay-empty-copy">Select an account to see usage.</p>
-              </section>
-            )
+            <section className="relay-usage-stat relay-usage-stat-full">
+              <p className="relay-empty-copy">Select an account to see usage.</p>
+            </section>
           )}
         </main>
       </div>
+      <SettingsPopover
+        open={settingsOpen}
+        updateState={updateState}
+        busyKey={busyKey}
+        repairResult={repairResult}
+        onCheck={checkForUpdates}
+        onDownload={downloadUpdate}
+        onInstall={installUpdate}
+        onFixCommonIssues={fixCommonSwitchIssues}
+        onClose={() => setSettingsOpen(false)}
+      />
+      <PendingSignInOverlay
+        flow={signInWidgetOpen ? pendingOAuthFlow : null}
+        onOpen={openExternal}
+        onCancel={cancelPendingSignIn}
+        cancelBusy={busyKey === "cancel-pending-oauth"}
+      />
     </div>
   );
 }

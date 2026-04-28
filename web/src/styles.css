@@ -165,6 +165,54 @@ code {
   cursor: not-allowed;
 }
 
+.relay-gear-button {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  position: relative;
+}
+
+.relay-gear-button.is-open {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: #1a242e;
+}
+
+.relay-gear-button.has-alert::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(111, 208, 174, 0.16);
+}
+
+.relay-gear-icon {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.relay-app-gear-button {
+  position: absolute;
+  top: 28px;
+  right: 28px;
+  z-index: 10;
+}
+
+.relay-app-gear-button.is-open {
+  z-index: 25;
+}
+
 .relay-account-list {
   display: grid;
   gap: 10px;
@@ -283,6 +331,7 @@ code {
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
+  padding-right: 64px;
 }
 
 .relay-main-label,
@@ -318,6 +367,82 @@ code {
   gap: 12px;
 }
 
+.relay-popover-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: auto;
+  background: rgba(3, 8, 12, 0.42);
+  backdrop-filter: blur(5px);
+}
+
+.relay-settings-layer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 86px 24px 24px;
+}
+
+.relay-signin-layer {
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 8, 12, 0.58);
+}
+
+.relay-floating-panel {
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(26, 38, 48, 0.98), rgba(13, 20, 25, 0.98)),
+    var(--panel);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.42);
+}
+
+.relay-settings-popover {
+  width: min(420px, calc(100vw - 48px));
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+  animation: relay-pop 160ms ease-out;
+}
+
+.relay-signin-window {
+  width: min(540px, calc(100vw - 48px));
+  animation: relay-pop 160ms ease-out;
+}
+
+.relay-signin-window .relay-pending-panel {
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.42);
+}
+
+.relay-popover-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.relay-popover-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+}
+
+@keyframes relay-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .relay-update-panel {
   display: grid;
   gap: 12px;
@@ -342,6 +467,15 @@ code {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+.relay-maintenance-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.relay-maintenance-panel .relay-account-action {
+  justify-self: start;
 }
 
 .relay-pending-code {
@@ -416,6 +550,24 @@ code {
 @media (max-width: 920px) {
   .app-shell {
     grid-template-columns: 1fr;
+  }
+
+  .relay-settings-layer,
+  .relay-signin-layer {
+    padding: 80px 14px 14px;
+  }
+
+  .relay-settings-layer {
+    justify-content: center;
+  }
+
+  .relay-app-gear-button {
+    top: 24px;
+    right: 24px;
+  }
+
+  .relay-main-header {
+    padding-right: 0;
   }
 
   .relay-usage-grid {

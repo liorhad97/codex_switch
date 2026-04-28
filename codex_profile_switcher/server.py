@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import shutil
 import subprocess
 import time
@@ -110,6 +111,10 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
             self._send_json(self.switcher.build_state())
             return
 
+        if self.path == "/api/diagnostics/fix":
+            self._send_json(self.switcher.fix_common_issues())
+            return
+
         account_match = re.fullmatch(r"/api/accounts/([^/]+)/primary", self.path)
         if account_match:
             try:
@@ -211,6 +216,12 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         return None
+
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
 
     def send_head(self):  # type: ignore[override]
         if self.path.startswith("/api/"):
@@ -343,6 +354,36 @@ class SwitcherServer(ThreadingHTTPServer):
 
     def import_accounts(self) -> None:
         self.store.import_accounts()
+
+    def fix_common_issues(self) -> dict[str, Any]:
+        fixed: list[str] = []
+        checks: list[str] = []
+        warnings: list[str] = []
+
+        _reset_live_state_cache()
+        fixed.append("Cleared cached live usage state.")
+
+        try:
+            self.store.import_accounts()
+            fixed.append("Refreshed account discovery snapshot.")
+        except Exception as error:  # noqa: BLE001
+            warnings.append(f"Account discovery refresh failed: {error}")
+
+        process_report = _terminate_stale_backend_processes(
+            current_pid=os.getpid(),
+            current_port=int(self.server_address[1]),
+        )
+        checks.extend(process_report["checks"])
+        fixed.extend(process_report["fixed"])
+        warnings.extend(process_report["warnings"])
+
+        return {
+            "ok": not warnings,
+            "checks": checks,
+            "fixed": fixed,
+            "warnings": warnings,
+            "state": self.build_state(),
+        }
 
     def start_pending_account(self, label: str | None = None) -> Any:
         del label
@@ -565,6 +606,17 @@ def _load_flutty_live_accounts() -> dict[str, dict[str, Any]]:
     return results
 
 
+def _reset_live_state_cache() -> None:
+    _FLUTTY_LIVE_STATE_CACHE.update(
+        {
+            "api_base": None,
+            "accounts": {},
+            "fetched_at": 0.0,
+            "cooldown_until": 0.0,
+        }
+    )
+
+
 def _detect_flutty_api_base() -> str | None:
     explicit = os.getenv("FLUTTY_ORC_API_BASE")
     if explicit:
@@ -584,6 +636,112 @@ def _detect_flutty_api_base() -> str | None:
             host, port = match.groups()
             return f"http://{host}:{port}"
     return None
+
+
+def _list_codex_switch_backend_processes() -> list[dict[str, Any]]:
+    if os.name == "nt":
+        return []
+
+    try:
+        output = subprocess.check_output(["ps", "-axo", "pid=,ppid=,command="], text=True)
+    except (subprocess.SubprocessError, OSError):
+        return []
+
+    processes: list[dict[str, Any]] = []
+    for line in output.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) != 3:
+            continue
+        pid_text, ppid_text, command = parts
+        if "codex_profile_switcher.server" not in command and "codex-switch-backend" not in command:
+            continue
+        try:
+            pid = int(pid_text)
+            ppid = int(ppid_text)
+        except ValueError:
+            continue
+        processes.append(
+            {
+                "pid": pid,
+                "ppid": ppid,
+                "command": command,
+                "host": _process_arg_value(command, "--host"),
+                "port": _process_arg_int(command, "--port"),
+                "static_root": _process_arg_value(command, "--static-root"),
+            }
+        )
+    return processes
+
+
+def _process_arg_value(command: str, name: str) -> str | None:
+    marker = f"{name} "
+    if marker not in command:
+        return None
+    value = command.split(marker, 1)[1].strip()
+    next_arg = re.search(r"\s--[a-zA-Z0-9-]+(?:\s|$)", value)
+    if next_arg and name != "--static-root":
+        value = value[: next_arg.start()].strip()
+    return value.strip("\"'") or None
+
+
+def _process_arg_int(command: str, name: str) -> int | None:
+    value = _process_arg_value(command, name)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _terminate_stale_backend_processes(*, current_pid: int, current_port: int) -> dict[str, list[str]]:
+    checks: list[str] = []
+    fixed: list[str] = []
+    warnings: list[str] = []
+    processes = _list_codex_switch_backend_processes()
+    stale_processes = [process for process in processes if process["pid"] != current_pid]
+
+    checks.append(
+        f"Found {len(processes)} codex switch backend process"
+        f"{'' if len(processes) == 1 else 'es'}."
+    )
+
+    for process in stale_processes:
+        pid = int(process["pid"])
+        port = process.get("port")
+        port_label = f" on port {port}" if port else ""
+        try:
+            _terminate_process_tree(pid)
+            fixed.append(f"Stopped stale backend process {pid}{port_label}.")
+        except OSError as error:
+            warnings.append(f"Could not stop stale backend process {pid}{port_label}: {error}")
+
+    if not stale_processes:
+        checks.append(f"No stale backend process was found beside current port {current_port}.")
+    return {"checks": checks, "fixed": fixed, "warnings": warnings}
+
+
+def _terminate_process_tree(pid: int) -> None:
+    if pid <= 0 or pid == os.getpid():
+        return
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + 1.5
+    while time.monotonic() < deadline:
+        if not _process_exists(pid):
+            return
+        time.sleep(0.05)
+    if _process_exists(pid):
+        os.kill(pid, signal.SIGKILL)
+
+
+def _process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
 
 
 def _is_address_in_use_error(error: OSError) -> bool:
