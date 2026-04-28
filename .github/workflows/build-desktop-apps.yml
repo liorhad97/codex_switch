@@ -29,11 +29,6 @@ jobs:
   build:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    if: >-
-      github.event_name != 'workflow_dispatch' ||
-      inputs.platform == 'all' ||
-      (inputs.platform == 'windows' && matrix.name == 'Windows') ||
-      (inputs.platform == 'macos' && matrix.name == 'macOS')
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +75,7 @@ jobs:
           python -m pip install --upgrade pip pyinstaller
 
       - name: Require macOS production signing and notarization secrets
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -99,7 +94,7 @@ jobs:
           fi
 
       - name: Prepare macOS signing keychain
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -204,7 +199,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Build macOS app
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -212,7 +207,7 @@ jobs:
         run: npm run ${{ matrix.script }}
 
       - name: Verify macOS app signature
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
         shell: bash
         run: |
           set -euo pipefail
@@ -242,20 +237,25 @@ jobs:
           spctl --assess --type execute --verbose=4 "${APP_PATH}"
 
       - name: Build Windows app
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'windows')
         run: npm run ${{ matrix.script }}
 
       - name: Smoke test Windows packaged app
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'windows')
         shell: pwsh
         run: ./scripts/windows-packaged-smoke.ps1
 
       - name: Smoke test Windows Electron UI from zip
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'windows')
         timeout-minutes: 4
         run: node scripts/windows-electron-ui-smoke.cjs
 
       - name: Upload installer artifacts
+        if: >-
+          github.event_name != 'workflow_dispatch' ||
+          inputs.platform == 'all' ||
+          (inputs.platform == 'windows' && matrix.name == 'Windows') ||
+          (inputs.platform == 'macos' && matrix.name == 'macOS')
         uses: actions/upload-artifact@v4
         with:
           name: codex-switch-${{ matrix.name }}
