@@ -375,7 +375,8 @@ async function verifyFixCommonIssuesButton(appExe, baseRoot) {
     await app.page.getByRole("dialog", { name: "App Controls" }).waitFor();
     await app.page.getByRole("button", { name: "Fix Common Switch Issues" }).click();
     await app.page
-      .getByText(/(Common issue scan finished|Scan finished)\. [1-9]\d* items? fixed\./)
+      .getByRole("status")
+      .filter({ hasText: /Common issue scan finished\. [1-9]\d* items? fixed\./ })
       .waitFor();
     assert(!fs.existsSync(skeletonRoot), `Fix Common Switch Issues did not remove ${skeletonRoot}`);
     console.log("Fix Common Switch Issues removed the fake Windows skeleton account.");
