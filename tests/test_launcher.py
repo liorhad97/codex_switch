@@ -13,6 +13,7 @@ from codex_profile_switcher.launcher import (
     build_codex_vscode_extension_command,
     codex_executable_path,
     codex_launch_env,
+    FORCE_TERMINATION_SIGNAL,
     is_default_codex_running,
     is_safe_codex_user_data_dir,
     launch_codex,
@@ -91,7 +92,7 @@ class LauncherTests(unittest.TestCase):
 
         self.assertEqual(
             kill.call_args_list,
-            [call(123, signal.SIGTERM), call(123, signal.SIGKILL)],
+            [call(123, signal.SIGTERM), call(123, FORCE_TERMINATION_SIGNAL)],
         )
         self.assertEqual(wait_for_exit.call_count, 2)
 
