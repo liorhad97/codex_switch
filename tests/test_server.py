@@ -18,6 +18,7 @@ from codex_profile_switcher.server import (
     _list_codex_switch_backend_processes,
     _resolve_codex_binary,
     _terminate_stale_backend_processes,
+    _windows_appx_codex_cli_candidates,
 )
 from codex_profile_switcher.store import AppPaths, ProfileStore
 
@@ -408,6 +409,34 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertFalse(skeleton_root.exists())
         self.assertEqual(payload["state"]["accounts"][0]["id"], "alpha")
 
+    def test_fix_common_issues_repairs_codex_binary_path(self) -> None:
+        class RepairingOAuthManager(FakeOAuthManager):
+            def __init__(self) -> None:
+                super().__init__()
+                self.codex_binary = "bad-codex.exe"
+
+            def set_codex_binary(self, codex_binary: str) -> None:
+                self.codex_binary = codex_binary
+
+        oauth_manager = RepairingOAuthManager()
+        with (
+            patch("codex_profile_switcher.server._resolve_codex_binary", side_effect=["bad-codex.exe", "good-codex.exe"]),
+            patch("codex_profile_switcher.server._list_codex_switch_backend_processes", return_value=[]),
+        ):
+            server = SwitcherServer(
+                ("127.0.0.1", 0),
+                static_root=self.static_root,
+                store=self.store,
+                oauth_manager=oauth_manager,
+            )
+            try:
+                payload = server.fix_common_issues()
+            finally:
+                server.server_close()
+
+        self.assertEqual(oauth_manager.codex_binary, "good-codex.exe")
+        self.assertIn("Updated Codex CLI path to good-codex.exe.", payload["fixed"])
+
     def test_stale_backend_cleanup_protects_packaged_backend_wrapper_process(self) -> None:
         current_pid = os.getpid()
         wrapper_pid = current_pid + 1000
@@ -657,6 +686,19 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertEqual(resolved.resolve(), cached_cli.resolve())
         self.assertEqual(cached_cli.read_text(encoding="utf-8"), "copied store cli")
         self.assertFalse(source_cli.exists())
+
+    def test_windows_appx_codex_cli_candidates_do_not_return_protected_source(self) -> None:
+        package_root = self.root / "WindowsApps" / "OpenAI.Codex_test"
+        source_cli = package_root / "app" / "resources" / "codex.exe"
+        source_cli.parent.mkdir(parents=True)
+        source_cli.write_text("store cli", encoding="utf-8")
+
+        with (
+            patch("codex_profile_switcher.server._is_windows", return_value=True),
+            patch("codex_profile_switcher.server.subprocess.check_output", return_value=f"{package_root}\n"),
+            patch("codex_profile_switcher.server._cache_windows_appx_codex_cli", return_value=None),
+        ):
+            self.assertEqual(_windows_appx_codex_cli_candidates(self.store), [])
 
     def test_add_account_retries_after_windows_codex_binary_repair(self) -> None:
         class RepairingOAuthManager(FakeOAuthManager):

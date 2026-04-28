@@ -412,6 +412,20 @@ class SwitcherServer(ThreadingHTTPServer):
         fixed.extend(process_report["fixed"])
         warnings.extend(process_report["warnings"])
 
+        try:
+            codex_binary = _resolve_codex_binary(self.store)
+            if codex_binary != self._codex_binary:
+                self._set_codex_binary(codex_binary)
+                fixed.append(f"Updated Codex CLI path to {codex_binary}.")
+            elif Path(codex_binary).is_file():
+                checks.append(f"Codex CLI is ready at {codex_binary}.")
+            else:
+                warnings.append(
+                    "Codex CLI was not found. Install and open Codex Desktop once, then reopen codex switch."
+                )
+        except Exception as error:  # noqa: BLE001
+            warnings.append(f"Codex CLI repair failed: {error}")
+
         return {
             "ok": not warnings,
             "checks": checks,
@@ -521,6 +535,12 @@ class SwitcherServer(ThreadingHTTPServer):
         self.oauth.close_all()
         super().server_close()
 
+    def _set_codex_binary(self, codex_binary: str) -> None:
+        self._codex_binary = codex_binary
+        set_codex_binary = getattr(self.oauth, "set_codex_binary", None)
+        if callable(set_codex_binary):
+            set_codex_binary(codex_binary)
+
     def _run_with_codex_repair(self, callback):  # noqa: ANN001
         try:
             return callback()
@@ -530,10 +550,7 @@ class SwitcherServer(ThreadingHTTPServer):
             repaired_binary = _resolve_codex_binary(self.store)
             if repaired_binary == self._codex_binary:
                 raise
-            self._codex_binary = repaired_binary
-            set_codex_binary = getattr(self.oauth, "set_codex_binary", None)
-            if callable(set_codex_binary):
-                set_codex_binary(repaired_binary)
+            self._set_codex_binary(repaired_binary)
             try:
                 return callback()
             except Exception as retry_error:  # noqa: BLE001
@@ -693,7 +710,7 @@ def _windows_appx_codex_cli_candidates(store: ProfileStore | None = None) -> lis
             [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
             stderr=subprocess.DEVNULL,
             text=True,
-            timeout=2,
+            timeout=15,
         )
     except (OSError, subprocess.SubprocessError, TimeoutError):
         return []
@@ -707,7 +724,6 @@ def _windows_appx_codex_cli_candidates(store: ProfileStore | None = None) -> lis
         cached_cli = _cache_windows_appx_codex_cli(source_cli, store=store)
         if cached_cli is not None:
             candidates.append(cached_cli)
-        candidates.append(source_cli)
     return _dedupe_paths(candidates)
 
 
@@ -752,7 +768,7 @@ def _copy_windows_appx_codex_cli_with_powershell(source_cli: Path, target_cli: P
         [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
         stderr=subprocess.DEVNULL,
         text=True,
-        timeout=5,
+        timeout=60,
     )
 
 
