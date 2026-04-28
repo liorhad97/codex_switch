@@ -31,7 +31,8 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(command, [str(codex_executable_path(DEFAULT_CODEX_APP_PATH))])
 
     def test_build_codex_vscode_extension_command_opens_codex_extension_uri(self) -> None:
-        command = build_codex_vscode_extension_command()
+        with patch("codex_profile_switcher.launcher.os.name", "posix"):
+            command = build_codex_vscode_extension_command()
         self.assertEqual(command, ["open", CODEX_VSCODE_URI])
 
     def test_build_codex_vscode_extension_command_uses_explorer_on_windows(self) -> None:
@@ -73,7 +74,10 @@ class LauncherTests(unittest.TestCase):
             (456, "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper"),
             (789, "/bin/bash"),
         ]
-        with patch("codex_profile_switcher.launcher._read_process_listing", return_value=process_listing):
+        with (
+            patch("codex_profile_switcher.launcher.os.name", "posix"),
+            patch("codex_profile_switcher.launcher._read_process_listing", return_value=process_listing),
+        ):
             self.assertEqual(running_vscode_pids(), [123])
 
     def test_running_vscode_pids_detects_windows_code_process(self) -> None:
@@ -117,6 +121,7 @@ class LauncherTests(unittest.TestCase):
         executable = codex_executable_path(DEFAULT_CODEX_APP_PATH)
         with (
             patch("codex_profile_switcher.launcher.terminate_running_codex") as terminate_running,
+            patch("codex_profile_switcher.launcher._windows_codex_app_id", return_value=None),
             patch("subprocess.Popen") as popen,
         ):
             launch_codex(DEFAULT_CODEX_APP_PATH)
@@ -152,6 +157,7 @@ class LauncherTests(unittest.TestCase):
 
     def test_terminate_running_vscode_quits_then_sigterms_stubborn_process(self) -> None:
         with (
+            patch("codex_profile_switcher.launcher.os.name", "posix"),
             patch("codex_profile_switcher.launcher.running_vscode_pids", return_value=[123]),
             patch("codex_profile_switcher.launcher._wait_for_vscode_exit", side_effect=[{123}, set()]) as wait_for_exit,
             patch("subprocess.run") as run,
