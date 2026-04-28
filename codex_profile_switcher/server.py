@@ -644,6 +644,7 @@ def _resolve_codex_binary(store: ProfileStore) -> str:
 def _windows_codex_binary_candidates(store: ProfileStore) -> list[Path]:
     candidates = [store.paths.data_root / "codex_cli" / "codex.exe"]
     candidates.extend(_windows_appx_codex_cli_candidates(store))
+    candidates.extend(_windows_vscode_extension_codex_cli_candidates())
     return _dedupe_paths(candidates)
 
 
@@ -725,6 +726,64 @@ def _windows_appx_codex_cli_candidates(store: ProfileStore | None = None) -> lis
         if cached_cli is not None:
             candidates.append(cached_cli)
     return _dedupe_paths(candidates)
+
+
+def _windows_vscode_extension_codex_cli_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    for extension_dir in _windows_vscode_codex_extension_dirs():
+        candidates.extend(
+            [
+                extension_dir / "bin" / "windows-x86_64" / "codex.exe",
+                extension_dir / "bin" / "win32-x64" / "codex.exe",
+                extension_dir / "bin" / "windows-x64" / "codex.exe",
+                extension_dir / "resources" / "codex.exe",
+                extension_dir / "codex.exe",
+            ]
+        )
+        try:
+            candidates.extend(extension_dir.rglob("codex.exe"))
+        except OSError:
+            continue
+    return _dedupe_paths(candidates)
+
+
+def _windows_vscode_codex_extension_dirs() -> list[Path]:
+    roots = _windows_vscode_extension_roots()
+    extension_dirs: list[Path] = []
+    name_prefixes = ("openai.chatgpt-", "openai.codex-", "openai.openai-")
+    name_markers = ("codex", "chatgpt")
+    for root in roots:
+        try:
+            children = sorted(root.iterdir(), key=lambda path: path.name.casefold(), reverse=True)
+        except OSError:
+            continue
+        for child in children:
+            if not child.is_dir():
+                continue
+            name = child.name.casefold()
+            if name.startswith(name_prefixes) or any(marker in name for marker in name_markers):
+                extension_dirs.append(child)
+    return _dedupe_paths(extension_dirs)
+
+
+def _windows_vscode_extension_roots() -> list[Path]:
+    home = Path.home()
+    userprofile = os.getenv("USERPROFILE")
+    homes = [home]
+    if userprofile:
+        homes.append(Path(userprofile))
+
+    roots: list[Path] = []
+    for base in homes:
+        roots.extend(
+            [
+                base / ".vscode" / "extensions",
+                base / ".vscode-insiders" / "extensions",
+                base / ".cursor" / "extensions",
+                base / ".windsurf" / "extensions",
+            ]
+        )
+    return _dedupe_paths(roots)
 
 
 def _cache_windows_appx_codex_cli(source_cli: Path, *, store: ProfileStore | None = None) -> Path | None:

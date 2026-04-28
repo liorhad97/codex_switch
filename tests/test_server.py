@@ -642,6 +642,28 @@ class SwitcherServerTests(unittest.TestCase):
         ):
             self.assertEqual(Path(_resolve_codex_binary(self.store)).resolve(), binary_path.resolve())
 
+    def test_resolve_codex_binary_checks_windows_vscode_extension_cli(self) -> None:
+        binary_path = (
+            self.root
+            / ".vscode"
+            / "extensions"
+            / "openai.chatgpt-26.422.62136-win32-x64"
+            / "bin"
+            / "windows-x86_64"
+            / "codex.exe"
+        )
+        binary_path.parent.mkdir(parents=True)
+        binary_path.write_text("extension cli", encoding="utf-8")
+
+        with (
+            patch.dict(os.environ, {"CODEX_BINARY": "", "USERPROFILE": str(self.root)}, clear=False),
+            patch("codex_profile_switcher.server._is_windows", return_value=True),
+            patch("codex_profile_switcher.server.shutil.which", return_value=None),
+            patch("codex_profile_switcher.server._windows_appx_codex_cli_candidates", return_value=[]),
+            patch("codex_profile_switcher.server.Path.home", return_value=self.root),
+        ):
+            self.assertEqual(Path(_resolve_codex_binary(self.store)).resolve(), binary_path.resolve())
+
     def test_resolve_codex_binary_caches_windows_store_cli(self) -> None:
         package_root = self.root / "WindowsApps" / "OpenAI.Codex_test"
         source_cli = package_root / "app" / "resources" / "codex.exe"
