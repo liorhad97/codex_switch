@@ -92,10 +92,11 @@ For normal `main` commits and manual runs, the workflow stamps the build with a 
 
 - `CLOUDFLARE_API_TOKEN`
 
-macOS updater releases must be signed with a stable Apple Developer ID certificate. Without this, Squirrel/Mac rejects `Restart to Update` with a code-signature validation error because each ad-hoc build has a different code hash. Add these repository secrets before publishing macOS updates:
+macOS updater releases must be signed with a stable certificate. Without this, Squirrel/Mac rejects `Restart to Update` with a code-signature validation error because each ad-hoc build has a different code hash. For public distribution, use an Apple Developer ID Application certificate and notarization. For internal/test distribution without the Apple Developer Program, a stable self-signed code-signing certificate can keep updater signatures consistent, but users will still see macOS trust warnings. Add these repository secrets before publishing macOS updates:
 
-- `CSC_LINK`: base64-encoded exported Developer ID Application `.p12`, or a private URL to it
+- `CSC_LINK`: base64-encoded exported code-signing `.p12`, or a private URL to it
 - `CSC_KEY_PASSWORD`: password for the exported `.p12`
+- `CSC_NAME`: optional certificate common name when using a custom certificate
 
 Notarization is optional for the updater swap itself, but recommended for user trust. To notarize in CI, also add:
 
@@ -103,7 +104,7 @@ Notarization is optional for the updater swap itself, but recommended for user t
 - `APPLE_APP_SPECIFIC_PASSWORD`
 - `APPLE_TEAM_ID`
 
-If users already installed an ad-hoc-signed build, they may need one manual reinstall from a Developer ID-signed `.dmg`; future signed updates can then install normally.
+If users already installed an ad-hoc-signed build, they may need one manual reinstall from the first stably signed `.dmg`; future updates signed by the same certificate can then install normally.
 
 You can still override the defaults if you move to another bucket or custom domain:
 

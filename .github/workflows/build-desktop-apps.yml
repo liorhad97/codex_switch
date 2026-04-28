@@ -73,7 +73,7 @@ jobs:
         shell: bash
         run: |
           if [[ -z "${CSC_LINK}" || -z "${CSC_KEY_PASSWORD}" ]]; then
-            echo "::error::macOS updater releases must be signed with a stable Developer ID certificate. Set repository secrets CSC_LINK and CSC_KEY_PASSWORD before publishing updates."
+            echo "::error::macOS updater releases must be signed with a stable certificate. Set repository secrets CSC_LINK and CSC_KEY_PASSWORD before publishing updates."
             exit 1
           fi
 
@@ -104,6 +104,7 @@ jobs:
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_NAME: ${{ secrets.CSC_NAME }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
