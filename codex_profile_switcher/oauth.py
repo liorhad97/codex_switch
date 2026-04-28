@@ -209,6 +209,13 @@ class AccountOAuthManager:
         for account_id in account_ids:
             self.close(account_id)
 
+    def set_codex_binary(self, codex_binary: str) -> None:
+        if codex_binary == self._codex_binary:
+            return
+        self.close_all()
+        with self._lock:
+            self._codex_binary = codex_binary
+
     def _ensure_session(self, account: AccountRecord) -> _SessionState:
         return self._ensure_session_state(
             account_id=account.id,

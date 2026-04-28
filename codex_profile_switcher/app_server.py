@@ -59,9 +59,9 @@ class CodexAppServerConnection:
                 )
             except OSError as error:
                 hint = (
-                    "Could not start Codex app-server because the Codex CLI was not found. "
-                    "Install and open Codex Desktop on this Windows account, or set CODEX_BINARY to the full "
-                    "codex.exe path, then restart codex switch."
+                    "Could not start Codex app-server because no usable Codex CLI was found. "
+                    "Codex Switch tried to repair Microsoft Store Codex automatically. "
+                    "Install and open Codex Desktop once on this Windows account, then restart codex switch."
                     if isinstance(error, FileNotFoundError)
                     else "Could not start Codex app-server. Install Codex, make sure the codex CLI is on PATH, "
                     "or set CODEX_BINARY to the codex executable path."

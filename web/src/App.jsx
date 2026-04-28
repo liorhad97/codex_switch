@@ -582,6 +582,7 @@ function App() {
   const [signInWidgetOpen, setSignInWidgetOpen] = useState(false);
   const [repairResult, setRepairResult] = useState(null);
   const usagePollRef = useRef({ token: 0, timeouts: [] });
+  const startupRepairRef = useRef(false);
 
   const stopUsagePolling = () => {
     usagePollRef.current.token += 1;
@@ -605,6 +606,30 @@ function App() {
   useEffect(() => {
     loadState();
   }, []);
+
+  useEffect(() => {
+    if (loading || !state || startupRepairRef.current) {
+      return;
+    }
+
+    startupRepairRef.current = true;
+    request("/api/diagnostics/fix", { method: "POST" })
+      .then((payload) => {
+        if (payload.state) {
+          setState((current) =>
+            current?.pending_oauth_flow && !payload.state.pending_oauth_flow ? current : payload.state
+          );
+        }
+        setRepairResult(payload);
+        const warningCount = payload.warnings?.length || 0;
+        if (warningCount > 0) {
+          setFeedback(`Startup check finished with ${warningCount} warning${warningCount === 1 ? "" : "s"}.`);
+        }
+      })
+      .catch(() => {
+        // Startup repair is best-effort. User actions still surface concrete errors.
+      });
+  }, [loading, state]);
 
   useEffect(() => {
     if (!updaterBridge) {

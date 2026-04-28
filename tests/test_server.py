@@ -632,6 +632,68 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertEqual(resolved.resolve(), cached_cli.resolve())
         self.assertEqual(cached_cli.read_text(encoding="utf-8"), "store cli")
 
+    def test_resolve_codex_binary_caches_windows_store_cli_with_powershell_copy(self) -> None:
+        package_root = self.root / "WindowsApps" / "OpenAI.Codex_test"
+        source_cli = package_root / "app" / "resources" / "codex.exe"
+        cached_cli = self.root / "codex_switch_data" / "codex_cli" / "codex.exe"
+
+        def fake_check_output(args, **_kwargs):  # noqa: ANN001
+            script = args[-1]
+            if "Get-AppxPackage" in script:
+                return f"{package_root}\n"
+            if "Copy-Item" in script:
+                cached_cli.write_text("copied store cli", encoding="utf-8")
+                return ""
+            raise AssertionError(f"Unexpected PowerShell command: {args}")
+
+        with (
+            patch.dict(os.environ, {"CODEX_BINARY": ""}, clear=False),
+            patch("codex_profile_switcher.server._is_windows", return_value=True),
+            patch("codex_profile_switcher.server.shutil.which", return_value=None),
+            patch("codex_profile_switcher.server.subprocess.check_output", side_effect=fake_check_output),
+        ):
+            resolved = Path(_resolve_codex_binary(self.store))
+
+        self.assertEqual(resolved.resolve(), cached_cli.resolve())
+        self.assertEqual(cached_cli.read_text(encoding="utf-8"), "copied store cli")
+        self.assertFalse(source_cli.exists())
+
+    def test_add_account_retries_after_windows_codex_binary_repair(self) -> None:
+        class RepairingOAuthManager(FakeOAuthManager):
+            def __init__(self) -> None:
+                super().__init__()
+                self.codex_binary = "bad-codex.exe"
+                self.start_calls = 0
+
+            def set_codex_binary(self, codex_binary: str) -> None:
+                self.codex_binary = codex_binary
+
+            def start_temporary(self) -> OAuthFlowSnapshot:
+                self.start_calls += 1
+                if self.codex_binary == "bad-codex.exe":
+                    raise RuntimeError("Could not start Codex app-server. Tried: bad-codex.exe.")
+                return super().start_temporary()
+
+        oauth_manager = RepairingOAuthManager()
+        with (
+            patch("codex_profile_switcher.server._is_windows", return_value=True),
+            patch("codex_profile_switcher.server._resolve_codex_binary", side_effect=["bad-codex.exe", "good-codex.exe"]),
+        ):
+            server = SwitcherServer(
+                ("127.0.0.1", 0),
+                static_root=self.static_root,
+                store=self.store,
+                oauth_manager=oauth_manager,
+            )
+            try:
+                flow = server.start_pending_account()
+            finally:
+                server.server_close()
+
+        self.assertEqual(flow.verification_uri, "https://chat.openai.com/auth/mock")
+        self.assertEqual(oauth_manager.codex_binary, "good-codex.exe")
+        self.assertEqual(oauth_manager.start_calls, 2)
+
     def test_list_backend_processes_parses_windows_process_listing(self) -> None:
         output = json.dumps(
             [

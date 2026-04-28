@@ -276,11 +276,11 @@ class SwitcherServer(ThreadingHTTPServer):
     ) -> None:
         self.static_root = static_root
         self.store = store
-        codex_binary = _resolve_codex_binary(store)
+        self._codex_binary = _resolve_codex_binary(store)
         self.oauth = oauth_manager or AccountOAuthManager(
             store=store,
             workspace_root=Path.cwd(),
-            codex_binary=codex_binary,
+            codex_binary=self._codex_binary,
         )
         self._selected_account_id: str | None = None
         super().__init__(
@@ -422,7 +422,7 @@ class SwitcherServer(ThreadingHTTPServer):
 
     def start_pending_account(self, label: str | None = None) -> Any:
         del label
-        return self.oauth.start_temporary()
+        return self._run_with_codex_repair(lambda: self.oauth.start_temporary())
 
     def cancel_pending_account(self) -> None:
         self.oauth.cancel_pending()
@@ -454,7 +454,7 @@ class SwitcherServer(ThreadingHTTPServer):
             )
             self._selected_account_id = account_id
             return None
-        flow = self.oauth.start(account)
+        flow = self._run_with_codex_repair(lambda: self.oauth.start(account))
         self._selected_account_id = account_id
         return flow
 
@@ -521,6 +521,24 @@ class SwitcherServer(ThreadingHTTPServer):
         self.oauth.close_all()
         super().server_close()
 
+    def _run_with_codex_repair(self, callback):  # noqa: ANN001
+        try:
+            return callback()
+        except Exception as first_error:  # noqa: BLE001
+            if not _is_windows() or not _looks_like_codex_start_error(first_error):
+                raise
+            repaired_binary = _resolve_codex_binary(self.store)
+            if repaired_binary == self._codex_binary:
+                raise
+            self._codex_binary = repaired_binary
+            set_codex_binary = getattr(self.oauth, "set_codex_binary", None)
+            if callable(set_codex_binary):
+                set_codex_binary(repaired_binary)
+            try:
+                return callback()
+            except Exception as retry_error:  # noqa: BLE001
+                raise retry_error from first_error
+
 
 def _find_account(accounts: list[AccountRecord], account_id: str) -> AccountRecord:
     for account in accounts:
@@ -555,22 +573,44 @@ def _has_codex_auth(account: AccountRecord) -> bool:
         return False
 
 
+def _looks_like_codex_start_error(error: Exception) -> bool:
+    message = str(error).casefold()
+    return any(
+        marker in message
+        for marker in (
+            "codex app-server",
+            "codex cli",
+            "codex.exe",
+            "could not start codex",
+            "file not found",
+            "no such file",
+            "access is denied",
+        )
+    )
+
+
 def _resolve_codex_binary(store: ProfileStore) -> str:
     explicit = os.getenv("CODEX_BINARY")
     if explicit:
         return explicit
 
-    path_binary = shutil.which("codex")
-    if path_binary:
-        return path_binary
-
     candidates: list[Path] = []
     if _is_windows():
-        candidates.extend(_windows_appx_codex_cli_candidates())
+        candidates.extend(_windows_codex_binary_candidates(store))
+    else:
+        path_binary = shutil.which("codex")
+        if path_binary:
+            return path_binary
+
     try:
         candidates.extend(_codex_app_server_candidates(store.load_config().codex_app_path))
     except (OSError, ValueError):
         pass
+
+    if _is_windows():
+        path_binary = shutil.which("codex")
+        if path_binary:
+            candidates.append(Path(path_binary))
 
     for candidate in candidates:
         try:
@@ -582,6 +622,12 @@ def _resolve_codex_binary(store: ProfileStore) -> str:
     if _is_windows():
         return "codex.exe"
     return "codex"
+
+
+def _windows_codex_binary_candidates(store: ProfileStore) -> list[Path]:
+    candidates = [store.paths.data_root / "codex_cli" / "codex.exe"]
+    candidates.extend(_windows_appx_codex_cli_candidates(store))
+    return _dedupe_paths(candidates)
 
 
 def _codex_app_server_candidates(codex_app_path: Path) -> list[Path]:
@@ -639,7 +685,7 @@ def _windows_codex_app_dirs(root: Path) -> list[Path]:
     ]
 
 
-def _windows_appx_codex_cli_candidates() -> list[Path]:
+def _windows_appx_codex_cli_candidates(store: ProfileStore | None = None) -> list[Path]:
     powershell = shutil.which("powershell") or shutil.which("pwsh") or "powershell"
     script = "Get-AppxPackage -Name 'OpenAI.Codex' | Select-Object -ExpandProperty InstallLocation"
     try:
@@ -658,25 +704,60 @@ def _windows_appx_codex_cli_candidates() -> list[Path]:
         if not install_location:
             continue
         source_cli = Path(install_location) / "app" / "resources" / "codex.exe"
-        cached_cli = _cache_windows_appx_codex_cli(source_cli)
+        cached_cli = _cache_windows_appx_codex_cli(source_cli, store=store)
         if cached_cli is not None:
             candidates.append(cached_cli)
         candidates.append(source_cli)
     return _dedupe_paths(candidates)
 
 
-def _cache_windows_appx_codex_cli(source_cli: Path) -> Path | None:
+def _cache_windows_appx_codex_cli(source_cli: Path, *, store: ProfileStore | None = None) -> Path | None:
     try:
-        if not source_cli.is_file():
-            return None
-        target_dir = Path.home().expanduser().resolve() / "codex_switch_data" / "codex_cli"
+        target_dir = (
+            store.paths.data_root
+            if store is not None
+            else Path.home().expanduser().resolve() / "codex_switch_data"
+        ) / "codex_cli"
         target_dir.mkdir(parents=True, exist_ok=True)
         target_cli = target_dir / "codex.exe"
-        if _should_refresh_cached_cli(source_cli, target_cli):
-            shutil.copy2(source_cli, target_cli)
+        _copy_windows_appx_codex_cli(source_cli, target_cli)
         return target_cli if target_cli.is_file() else None
-    except OSError:
+    except (OSError, subprocess.SubprocessError, TimeoutError):
         return None
+
+
+def _copy_windows_appx_codex_cli(source_cli: Path, target_cli: Path) -> None:
+    try:
+        if source_cli.is_file():
+            if _should_refresh_cached_cli(source_cli, target_cli):
+                shutil.copy2(source_cli, target_cli)
+            return
+    except OSError:
+        pass
+
+    _copy_windows_appx_codex_cli_with_powershell(source_cli, target_cli)
+
+
+def _copy_windows_appx_codex_cli_with_powershell(source_cli: Path, target_cli: Path) -> None:
+    powershell = shutil.which("powershell") or shutil.which("pwsh") or "powershell"
+    script = (
+        "$ErrorActionPreference = 'Stop'; "
+        f"$source = {_powershell_quote(str(source_cli))}; "
+        f"$target = {_powershell_quote(str(target_cli))}; "
+        "if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { exit 2 }; "
+        "New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null; "
+        "Copy-Item -LiteralPath $source -Destination $target -Force"
+    )
+    subprocess.check_output(
+        [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+        stderr=subprocess.DEVNULL,
+        text=True,
+        timeout=5,
+    )
+
+
+def _powershell_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _should_refresh_cached_cli(source_cli: Path, target_cli: Path) -> bool:
