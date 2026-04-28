@@ -2,6 +2,16 @@ name: Build desktop apps
 
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: "Which platform to build for manual update publishing"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - windows
+          - macos
   push:
     branches:
       - main
@@ -19,6 +29,11 @@ jobs:
   build:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      inputs.platform == 'all' ||
+      (inputs.platform == 'windows' && matrix.name == 'Windows') ||
+      (inputs.platform == 'macos' && matrix.name == 'macOS')
     strategy:
       fail-fast: false
       matrix:
