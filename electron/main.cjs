@@ -12,6 +12,8 @@ const DEFAULT_BACKEND_PORT = Number.parseInt(process.env.CODEX_SWITCH_PORT || "8
 const EXTERNAL_BACKEND_URL = process.env.CODEX_SWITCH_URL || null;
 const FORCE_OWN_BACKEND =
   process.env.CODEX_SWITCH_FORCE_OWN_BACKEND === "1" || (!app.isPackaged && !EXTERNAL_BACKEND_URL);
+const REUSE_EXISTING_BACKEND =
+  process.env.CODEX_SWITCH_REUSE_EXISTING_BACKEND === "1" && !FORCE_OWN_BACKEND;
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const PRELOAD_PATH = path.join(__dirname, "preload.cjs");
 let backendProcess = null;
@@ -339,12 +341,12 @@ async function resolveBackendTarget() {
     return { url: EXTERNAL_BACKEND_URL, port: null, shouldSpawn: false };
   }
 
-  if (!FORCE_OWN_BACKEND && activeBackendUrl && await checkBackendHealth(activeBackendUrl)) {
+  if (REUSE_EXISTING_BACKEND && activeBackendUrl && await checkBackendHealth(activeBackendUrl)) {
     return { url: activeBackendUrl, port: activeBackendPort, shouldSpawn: false };
   }
 
   const preferredUrl = `http://${BACKEND_HOST}:${DEFAULT_BACKEND_PORT}`;
-  if (!FORCE_OWN_BACKEND && await checkBackendHealth(preferredUrl)) {
+  if (REUSE_EXISTING_BACKEND && await checkBackendHealth(preferredUrl)) {
     activeBackendUrl = preferredUrl;
     activeBackendPort = DEFAULT_BACKEND_PORT;
     return { url: preferredUrl, port: DEFAULT_BACKEND_PORT, shouldSpawn: false };
