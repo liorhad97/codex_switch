@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import shutil
-import tomllib
 from pathlib import Path
 from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib
 
 
 PENDING_OAUTH_MARKER = ".codex-switch-pending-oauth"
