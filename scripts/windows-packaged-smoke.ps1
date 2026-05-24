@@ -149,6 +149,11 @@ try {
     throw "Packaged backend did not become healthy at $baseUrl"
   }
 
+  $licenseResult = Invoke-RestMethod -Method Get -Uri "$baseUrl/api/license" -TimeoutSec 10
+  if (-not $licenseResult.license.api_configured -or -not $licenseResult.license.public_key_configured) {
+    throw "Packaged backend is missing license activation config. api_configured=$($licenseResult.license.api_configured) public_key_configured=$($licenseResult.license.public_key_configured)"
+  }
+
   $fixResult = Invoke-RestMethod -Method Post -Uri "$baseUrl/api/diagnostics/fix" -Body "{}" -ContentType "application/json" -TimeoutSec 10
   $fixedText = ($fixResult.fixed -join "`n")
   if ($fixedText -notmatch "Removed 1 skeleton profile: skeleton-1\.") {

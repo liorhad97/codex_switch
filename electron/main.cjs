@@ -14,6 +14,15 @@ const FORCE_OWN_BACKEND =
   process.env.CODEX_SWITCH_FORCE_OWN_BACKEND === "1" || (!app.isPackaged && !EXTERNAL_BACKEND_URL);
 const REUSE_EXISTING_BACKEND =
   process.env.CODEX_SWITCH_REUSE_EXISTING_BACKEND === "1" && !FORCE_OWN_BACKEND;
+const LICENSE_API_BASE = "https://codex-switch-license.liorhadad97.workers.dev";
+const LICENSE_PUBLIC_JWK = {
+  key_ops: ["verify"],
+  ext: true,
+  kty: "EC",
+  x: "EJVOaznnJxkv7dkFzBioH6z9XbQUzOuOg0hDS6fJfXA",
+  y: "intz7-QthHNyO_k92JibFXhSBNWS6wKorrTMXYieoGg",
+  crv: "P-256"
+};
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const PRELOAD_PATH = path.join(__dirname, "preload.cjs");
 let backendProcess = null;
@@ -324,7 +333,10 @@ function startBackend(port) {
     cwd: backend.cwd,
     env: {
       ...process.env,
-      CODEX_SWITCH_APP_VERSION: app.getVersion()
+      CODEX_SWITCH_APP_VERSION: app.getVersion(),
+      CODEX_SWITCH_LICENSE_API_BASE: process.env.CODEX_SWITCH_LICENSE_API_BASE || LICENSE_API_BASE,
+      CODEX_SWITCH_LICENSE_PUBLIC_JWK:
+        process.env.CODEX_SWITCH_LICENSE_PUBLIC_JWK || JSON.stringify(LICENSE_PUBLIC_JWK)
     },
     stdio: app.isPackaged ? "ignore" : "inherit",
     windowsHide: true

@@ -1,0 +1,15 @@
+name = "codex-switch-license"
+main = "workers/license-worker/src/index-durable.js"
+compatibility_date = "2026-05-18"
+
+[vars]
+LEASE_DAYS = "7"
+LICENSE_KEY_ID = "codex-switch-v1"
+
+[[durable_objects.bindings]]
+name = "LICENSE_STORE"
+class_name = "LicenseStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LicenseStore"]
