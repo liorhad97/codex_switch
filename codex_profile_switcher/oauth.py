@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -127,7 +127,7 @@ class AccountOAuthManager:
                 rate_limit_result = session.connection.request("account/rateLimits/read")
                 rate_limits = rate_limit_result.get("rateLimits")
                 session.rate_limits = rate_limits if isinstance(rate_limits, dict) else None
-                session.last_rate_limit_refresh = datetime.now(UTC)
+                session.last_rate_limit_refresh = datetime.now(timezone.utc)
                 session.last_error = None
             except Exception as error:
                 session.last_error = _format_account_state_error(error)
@@ -300,14 +300,14 @@ class AccountOAuthManager:
         if method == "account/rateLimits/updated":
             rate_limits = params.get("rateLimits")
             session.rate_limits = rate_limits if isinstance(rate_limits, dict) else None
-            session.last_rate_limit_refresh = datetime.now(UTC)
+            session.last_rate_limit_refresh = datetime.now(timezone.utc)
             session.last_error = None
 
     @staticmethod
     def _rate_limits_stale(session: _SessionState) -> bool:
         if session.last_rate_limit_refresh is None:
             return True
-        return (datetime.now(UTC) - session.last_rate_limit_refresh) > timedelta(seconds=30)
+        return (datetime.now(timezone.utc) - session.last_rate_limit_refresh) > timedelta(seconds=30)
 
     @staticmethod
     def _begin_login(session: _SessionState) -> OAuthFlowSnapshot:
