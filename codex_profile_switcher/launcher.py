@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import shutil
 import subprocess
 import json
 import time
 from pathlib import Path
+
+from .profile_home import codex_home_path, sync_profile_home
 
 def _default_windows_local_appdata() -> Path:
     value = os.getenv("LOCALAPPDATA")
@@ -30,8 +33,13 @@ def _default_codex_user_data_dir() -> Path:
     return Path.home() / "Library" / "Application Support" / "Codex"
 
 
+def _default_codex_home() -> Path:
+    return Path.home().expanduser().resolve() / ".codex"
+
+
 DEFAULT_CODEX_APP_PATH = _default_codex_app_path()
 DEFAULT_CODEX_USER_DATA_DIR = _default_codex_user_data_dir()
+DEFAULT_CODEX_HOME = _default_codex_home()
 CODEX_VSCODE_URI = "vscode://openai.chatgpt/"
 VSCODE_BUNDLE_ID = "com.microsoft.VSCode"
 CODEX_TERMINATION_TIMEOUT_SECONDS = 5.0
@@ -78,7 +86,17 @@ def codex_launch_env(
     account_home_dir: Path | None = None,
 ) -> dict[str, str]:
     del user_data_dir, account_home_dir
-    return dict(os.environ)
+    env = dict(os.environ)
+    env["CODEX_HOME"] = str(DEFAULT_CODEX_HOME)
+    env.setdefault("HOME", str(Path.home().expanduser().resolve()))
+    env.setdefault("USERPROFILE", str(Path.home().expanduser().resolve()))
+    return env
+
+
+def codex_isolated_launch_env(account_home_dir: Path) -> dict[str, str]:
+    env = dict(os.environ)
+    env["CODEX_HOME"] = str(codex_home_path(account_home_dir))
+    return env
 
 
 def _read_process_listing() -> list[tuple[int, str]]:
@@ -134,12 +152,51 @@ def _read_windows_process_listing() -> list[tuple[int, str]]:
 
 
 def _matches_codex_executable(command: str, executable: str) -> bool:
-    return command == executable or command.startswith(f"{executable} ")
+    quoted_executable = f'"{executable}"'
+    single_quoted_executable = f"'{executable}'"
+    return (
+        command == executable
+        or command.startswith(f"{executable} ")
+        or command == quoted_executable
+        or command.startswith(f"{quoted_executable} ")
+        or command == single_quoted_executable
+        or command.startswith(f"{single_quoted_executable} ")
+    )
+
+
+def _path_text_variants(path: Path) -> set[str]:
+    resolved = str(path.expanduser().resolve())
+    variants = {resolved}
+    if os.name == "nt":
+        variants.add(resolved.replace("/", "\\"))
+    return variants
+
+
+def _command_uses_default_codex_profile(command: str) -> bool:
+    if "--user-data-dir" not in command:
+        return True
+
+    for default_dir in _path_text_variants(DEFAULT_CODEX_USER_DATA_DIR):
+        escaped = re.escape(default_dir)
+        path_pattern = rf"{escaped}[\\/]?"
+        pattern = rf"--user-data-dir(?:=|\s+)(?:\"{path_pattern}\"|'{path_pattern}'|{path_pattern})(?=\s|$)"
+        if re.search(pattern, command):
+            return True
+    return False
 
 
 def running_codex_pids(codex_app_path: Path) -> list[int]:
     executable = str(codex_executable_path(codex_app_path))
     return [pid for pid, command in _read_process_listing() if _matches_codex_executable(command, executable)]
+
+
+def running_default_codex_pids(codex_app_path: Path) -> list[int]:
+    executable = str(codex_executable_path(codex_app_path))
+    return [
+        pid
+        for pid, command in _read_process_listing()
+        if _matches_codex_executable(command, executable) and _command_uses_default_codex_profile(command)
+    ]
 
 
 def _matches_vscode_main_process(command: str) -> bool:
@@ -156,14 +213,7 @@ def running_vscode_pids() -> list[int]:
 
 
 def is_default_codex_running() -> bool:
-    default_dir = str(DEFAULT_CODEX_USER_DATA_DIR.expanduser().resolve())
-    executable = str(codex_executable_path(DEFAULT_CODEX_APP_PATH))
-    for _, command in _read_process_listing():
-        if _matches_codex_executable(command, executable) and (
-            f"--user-data-dir={default_dir}" in command or command == executable
-        ):
-            return True
-    return False
+    return bool(running_default_codex_pids(DEFAULT_CODEX_APP_PATH))
 
 
 def _wait_for_codex_exit(codex_app_path: Path, pids: set[int], timeout_seconds: float) -> set[int]:
@@ -197,7 +247,7 @@ def terminate_running_codex(
     *,
     timeout_seconds: float = CODEX_TERMINATION_TIMEOUT_SECONDS,
 ) -> bool:
-    pids = set(running_codex_pids(codex_app_path))
+    pids = set(running_default_codex_pids(codex_app_path))
     if not pids:
         return False
 
@@ -277,13 +327,31 @@ def build_codex_launch_command(
     account_home_dir: Path | None = None,
 ) -> list[str]:
     del user_data_dir, account_home_dir
+    default_user_data_arg = f"--user-data-dir={DEFAULT_CODEX_USER_DATA_DIR.expanduser().resolve()}"
     if os.name == "nt":
         app_id = _windows_codex_app_id()
         executable = codex_executable_path(codex_app_path)
         if app_id and (_is_windows_apps_path(executable) or not executable.is_file()):
             return ["explorer.exe", f"shell:AppsFolder\\{app_id}"]
     executable = codex_executable_path(codex_app_path)
-    return [str(executable)]
+    return [str(executable), default_user_data_arg]
+
+
+def build_codex_isolated_launch_command(
+    codex_app_path: Path,
+    user_data_dir: Path,
+    account_home_dir: Path | None = None,
+) -> list[str]:
+    del account_home_dir
+    executable = codex_executable_path(codex_app_path)
+    if os.name == "nt":
+        app_id = _windows_codex_app_id()
+        if app_id and (_is_windows_apps_path(executable) or not executable.is_file()):
+            raise ValueError(
+                "Isolated Codex app launches need a direct Codex executable path. "
+                "The Windows Store Codex launcher cannot receive an isolated profile argument."
+            )
+    return [str(executable), f"--user-data-dir={user_data_dir.expanduser().resolve()}"]
 
 
 def launch_codex(
@@ -297,6 +365,28 @@ def launch_codex(
     subprocess.Popen(
         command,
         env=codex_launch_env(),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def launch_codex_isolated(
+    codex_app_path: Path,
+    user_data_dir: Path,
+    account_home_dir: Path,
+) -> None:
+    resolved_user_data_dir = user_data_dir.expanduser().resolve()
+    resolved_user_data_dir.mkdir(parents=True, exist_ok=True)
+    resolved_account_home_dir = sync_profile_home(account_home_dir)
+    command = build_codex_isolated_launch_command(
+        codex_app_path,
+        resolved_user_data_dir,
+        resolved_account_home_dir,
+    )
+    subprocess.Popen(
+        command,
+        env=codex_isolated_launch_env(resolved_account_home_dir),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,

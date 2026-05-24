@@ -12,6 +12,7 @@ on:
           - all
           - windows
           - macos
+          - linux
   push:
     branches:
       - main
@@ -49,6 +50,14 @@ jobs:
               windows-installer/*.exe
               windows-installer/*.zip
               windows-installer/*.blockmap
+          - name: Linux
+            os: ubuntu-latest
+            script: dist:linux
+            artifact_path: |
+              linux-installer/latest-linux.yml
+              linux-installer/*.AppImage
+              linux-installer/*.zip
+              linux-installer/*.blockmap
 
     env:
       PYTHON: python
@@ -79,6 +88,10 @@ jobs:
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -88,8 +101,36 @@ jobs:
             echo "::error::macOS releases must be signed with an Apple Developer ID Application certificate. Set CSC_LINK and CSC_KEY_PASSWORD to a Developer ID Application .p12 before publishing updates."
             exit 1
           fi
-          if [[ -z "${APPLE_ID}" || -z "${APPLE_APP_SPECIFIC_PASSWORD}" || -z "${APPLE_TEAM_ID}" ]]; then
-            echo "::error::macOS releases must be notarized by Apple. Set APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID before publishing updates."
+
+          HAS_API_KEY_CONTENT=0
+          HAS_API_KEY_METADATA=0
+          HAS_LEGACY_CREDENTIALS=0
+          HAS_LEGACY_PARTIAL=0
+
+          if [[ -n "${APPLE_API_KEY_P8}" || -n "${APPLE_API_KEY_BASE64}" ]]; then
+            HAS_API_KEY_CONTENT=1
+          fi
+          if [[ -n "${APPLE_API_KEY_ID}" && -n "${APPLE_API_ISSUER}" ]]; then
+            HAS_API_KEY_METADATA=1
+          fi
+          if [[ -n "${APPLE_ID}" && -n "${APPLE_APP_SPECIFIC_PASSWORD}" && -n "${APPLE_TEAM_ID}" ]]; then
+            HAS_LEGACY_CREDENTIALS=1
+          fi
+          if [[ -n "${APPLE_ID}" || -n "${APPLE_APP_SPECIFIC_PASSWORD}" || -n "${APPLE_TEAM_ID}" ]]; then
+            HAS_LEGACY_PARTIAL=1
+          fi
+
+          if [[ "${HAS_API_KEY_CONTENT}" == "1" || -n "${APPLE_API_KEY_ID}" || -n "${APPLE_API_ISSUER}" ]]; then
+            if [[ "${HAS_API_KEY_CONTENT}" != "1" || "${HAS_API_KEY_METADATA}" != "1" ]]; then
+              echo "::error::App Store Connect notarization requires APPLE_API_KEY_P8 or APPLE_API_KEY_BASE64, plus APPLE_API_KEY_ID and APPLE_API_ISSUER."
+              exit 1
+            fi
+          elif [[ "${HAS_LEGACY_CREDENTIALS}" != "1" ]]; then
+            if [[ "${HAS_LEGACY_PARTIAL}" == "1" ]]; then
+              echo "::error::Apple ID notarization requires APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID."
+            else
+              echo "::error::macOS releases must be notarized by Apple. Prefer App Store Connect secrets APPLE_API_KEY_P8, APPLE_API_KEY_ID, and APPLE_API_ISSUER."
+            fi
             exit 1
           fi
 
@@ -176,6 +217,53 @@ jobs:
 
           echo "CSC_KEYCHAIN=${KEYCHAIN_PATH}" >> "${GITHUB_ENV}"
 
+      - name: Prepare macOS notarization credentials
+        if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${APPLE_API_KEY_P8}" || -n "${APPLE_API_KEY_BASE64}" ]]; then
+            API_KEY_PATH="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+
+            if [[ -n "${APPLE_API_KEY_BASE64}" ]]; then
+              export API_KEY_PATH APPLE_API_KEY_BASE64
+              node -e 'const fs = require("fs"); const key = (process.env.APPLE_API_KEY_BASE64 || "").replace(/\s/g, ""); fs.writeFileSync(process.env.API_KEY_PATH, Buffer.from(key, "base64"), { mode: 0o600 });'
+            else
+              export API_KEY_PATH APPLE_API_KEY_P8
+              node -e 'const fs = require("fs"); const key = (process.env.APPLE_API_KEY_P8 || "").replace(/\\n/g, "\n"); fs.writeFileSync(process.env.API_KEY_PATH, key, { mode: 0o600 });'
+            fi
+
+            if ! grep -q "BEGIN PRIVATE KEY" "${API_KEY_PATH}"; then
+              echo "::error::The App Store Connect API key secret did not decode to a .p8 private key."
+              exit 1
+            fi
+            if ! openssl pkey -in "${API_KEY_PATH}" -noout >/dev/null 2>&1; then
+              echo "::error::The App Store Connect API key secret is not a valid .p8 private key."
+              exit 1
+            fi
+
+            {
+              echo "APPLE_API_KEY=${API_KEY_PATH}"
+              echo "APPLE_API_KEY_ID=${APPLE_API_KEY_ID}"
+              echo "APPLE_API_ISSUER=${APPLE_API_ISSUER}"
+            } >> "${GITHUB_ENV}"
+          else
+            {
+              echo "APPLE_ID=${APPLE_ID}"
+              echo "APPLE_APP_SPECIFIC_PASSWORD=${APPLE_APP_SPECIFIC_PASSWORD}"
+              echo "APPLE_TEAM_ID=${APPLE_TEAM_ID}"
+            } >> "${GITHUB_ENV}"
+          fi
+
       - name: Set updater version
         shell: bash
         run: |
@@ -200,10 +288,6 @@ jobs:
 
       - name: Build macOS app
         if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run ${{ matrix.script }}
 
       - name: Verify macOS app signature
@@ -240,6 +324,10 @@ jobs:
         if: runner.os == 'Windows' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'windows')
         run: npm run ${{ matrix.script }}
 
+      - name: Build Linux app
+        if: runner.os == 'Linux' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'linux')
+        run: npm run ${{ matrix.script }}
+
       - name: Smoke test Windows packaged app
         if: runner.os == 'Windows' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'windows')
         shell: pwsh
@@ -255,7 +343,8 @@ jobs:
           github.event_name != 'workflow_dispatch' ||
           inputs.platform == 'all' ||
           (inputs.platform == 'windows' && matrix.name == 'Windows') ||
-          (inputs.platform == 'macos' && matrix.name == 'macOS')
+          (inputs.platform == 'macos' && matrix.name == 'macOS') ||
+          (inputs.platform == 'linux' && matrix.name == 'Linux')
         uses: actions/upload-artifact@v4
         with:
           name: codex-switch-${{ matrix.name }}

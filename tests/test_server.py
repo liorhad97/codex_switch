@@ -104,6 +104,25 @@ class FakeOAuthManager:
         return None
 
 
+class FakeLicenseManager:
+    def __init__(self, licensed: bool = True) -> None:
+        self.licensed = licensed
+
+    def current_state(self, *, refresh: bool = False) -> dict[str, object]:  # noqa: ARG002
+        return {
+            "licensed": self.licensed,
+            "status": "active" if self.licensed else "missing",
+            "message": "active" if self.licensed else "Activation required.",
+        }
+
+    def activate(self, license_key: str) -> dict[str, object]:  # noqa: ARG002
+        self.licensed = True
+        return self.current_state()
+
+    def refresh_license(self) -> dict[str, object]:
+        return self.current_state()
+
+
 class SwitcherServerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -192,6 +211,7 @@ class SwitcherServerTests(unittest.TestCase):
             static_root=self.static_root,
             store=self.store,
             oauth_manager=oauth_manager,
+            license_manager=FakeLicenseManager(),
         )
         try:
             payload = server.build_state()
@@ -237,6 +257,7 @@ class SwitcherServerTests(unittest.TestCase):
             static_root=self.static_root,
             store=self.store,
             oauth_manager=oauth_manager,
+            license_manager=FakeLicenseManager(),
         )
         try:
             server.cancel_pending_account()
@@ -255,6 +276,7 @@ class SwitcherServerTests(unittest.TestCase):
             static_root=self.static_root,
             store=self.store,
             oauth_manager=oauth_manager,
+            license_manager=FakeLicenseManager(),
         )
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -279,6 +301,33 @@ class SwitcherServerTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 500)
         self.assertEqual(payload["error"], "Codex app-server did not return a ChatGPT sign-in URL.")
+
+    def test_api_routes_require_license_before_account_state(self) -> None:
+        server = SwitcherServer(
+            ("127.0.0.1", 0),
+            static_root=self.static_root,
+            store=self.store,
+            oauth_manager=FakeOAuthManager(),
+            license_manager=FakeLicenseManager(licensed=False),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaises(urllib_error.HTTPError) as raised:
+                urllib_request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/api/state", timeout=2)
+            error_response = raised.exception
+            try:
+                payload = json.loads(error_response.read().decode("utf-8"))
+            finally:
+                error_response.close()
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+
+        self.assertEqual(raised.exception.code, 403)
+        self.assertFalse(payload["license"]["licensed"])
+        self.assertEqual(payload["code"], "missing")
 
     def test_remove_account_clears_selection_and_deletes_profile(self) -> None:
         account, _config = self.store.add_local_account("Local alpha")
@@ -536,6 +585,38 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertEqual(build_command.call_args.args, (self.store.load_config().codex_app_path,))
         self.assertEqual(launch_codex.call_args.args, (self.store.load_config().codex_app_path,))
         self.assertEqual(server.store.load_config().primary_account_id, "local-1")
+
+    def test_launch_account_isolated_uses_profile_without_changing_primary(self) -> None:
+        self._write_auth(self.paths.prepared_profiles_root / "alpha" / "home")
+        self._write_auth(self.paths.prepared_profiles_root / "beta" / "home")
+        self.store.import_accounts()
+        self.store.set_primary(self.store.load_config(), "beta")
+        server = SwitcherServer(
+            ("127.0.0.1", 0),
+            static_root=self.static_root,
+            store=self.store,
+            oauth_manager=FakeOAuthManager(),
+        )
+        try:
+            accounts, config = self.store.load_accounts()
+            alpha = next(account for account in accounts if account.id == "alpha")
+            with (
+                patch(
+                    "codex_profile_switcher.server.build_codex_isolated_launch_command",
+                    return_value=["/Applications/Codex.app/Contents/MacOS/Codex", "--user-data-dir=/tmp/alpha"],
+                ) as build_command,
+                patch("codex_profile_switcher.server.launch_codex_isolated") as launch_codex_isolated,
+            ):
+                command = server.launch_account_isolated("alpha")
+        finally:
+            server.server_close()
+
+        self.assertEqual(command, ["/Applications/Codex.app/Contents/MacOS/Codex", "--user-data-dir=/tmp/alpha"])
+        build_command.assert_called_once_with(config.codex_app_path, alpha.profile_root.resolve(), alpha.home_dir)
+        launch_codex_isolated.assert_called_once_with(config.codex_app_path, alpha.profile_root.resolve(), alpha.home_dir)
+        loaded_config = self.store.load_config()
+        self.assertEqual(loaded_config.primary_account_id, "beta")
+        self.assertEqual(loaded_config.last_selected_account_id, "alpha")
 
     def test_set_account_for_codex_vscode_sets_primary_and_opens_extension_uri(self) -> None:
         self.store.persist_local_oauth_account(

@@ -7,9 +7,11 @@ from tkinter import font as tkfont
 
 from .launcher import (
     DEFAULT_CODEX_USER_DATA_DIR,
+    build_codex_isolated_launch_command,
     build_codex_launch_command,
     is_safe_codex_user_data_dir,
     launch_codex,
+    launch_codex_isolated,
     reveal_in_finder,
 )
 from .models import AccountRecord, SwitcherConfig, format_status, format_timestamp
@@ -382,6 +384,11 @@ class AccountSwitcherApp:
         if account.mapped_codex_profile:
             self._make_button(
                 button_column,
+                "Codex App Isolated",
+                self._open_selected_in_codex_isolated,
+            ).pack(fill="x", pady=(10, 0))
+            self._make_button(
+                button_column,
                 "Reveal Launch Profile",
                 lambda: reveal_in_finder(account.mapped_codex_profile or account.home_dir),
             ).pack(fill="x", pady=(10, 0))
@@ -510,6 +517,41 @@ class AccountSwitcherApp:
             return
 
         messagebox.showinfo("Launching Codex", "Codex was launched with this command:\n\n" + " ".join(command))
+
+    def _open_selected_in_codex_isolated(self) -> None:
+        account = self._selected_account()
+        if account is None:
+            return
+        user_data_dir = (account.mapped_codex_profile or account.profile_root).expanduser().resolve()
+        if not is_safe_codex_user_data_dir(user_data_dir):
+            messagebox.showerror(
+                "Unsafe profile path",
+                (
+                    "The selected directory points at the default Codex profile or a nested path inside it.\n\n"
+                    f"Rejected path:\n{user_data_dir}\n\n"
+                    f"Default path:\n{DEFAULT_CODEX_USER_DATA_DIR}"
+                ),
+            )
+            return
+        self.config = self.store.set_selected_account(self.config, account.id)
+
+        try:
+            command = build_codex_isolated_launch_command(self.config.codex_app_path, user_data_dir, account.home_dir)
+            launch_codex_isolated(self.config.codex_app_path, user_data_dir, account.home_dir)
+        except FileNotFoundError:
+            messagebox.showerror(
+                "Codex not found",
+                f"Codex.app was not found at:\n{self.config.codex_app_path}",
+            )
+            return
+        except Exception as error:  # pragma: no cover - UI error path
+            messagebox.showerror("Launch failed", f"Could not launch Codex isolated.\n\n{error}")
+            return
+
+        messagebox.showinfo(
+            "Launching Codex",
+            "Codex was launched in an isolated profile with this command:\n\n" + " ".join(command),
+        )
 
     def _make_badge(self, master: tk.Misc, text: str, *, bg: str, fg: str) -> tk.Label:
         return tk.Label(

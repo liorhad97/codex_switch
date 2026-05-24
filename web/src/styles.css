@@ -48,6 +48,105 @@ code {
   overflow: hidden;
 }
 
+.license-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #0b1115;
+}
+
+.license-panel {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.36);
+}
+
+.license-brand {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 14px;
+  background: var(--panel-strong);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.license-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 2.35rem;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.license-copy {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.license-form {
+  display: grid;
+  gap: 10px;
+}
+
+.license-label {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.license-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #0d1419;
+  color: var(--text);
+  padding: 13px 14px;
+  outline: none;
+  font-family: var(--font-mono);
+}
+
+.license-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+}
+
+.license-input:disabled {
+  opacity: 0.58;
+}
+
+.license-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.license-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  text-transform: capitalize;
+}
+
+.license-meta span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: var(--panel-strong);
+}
+
 .relay-update-screen {
   position: absolute;
   inset: 0;

@@ -2,8 +2,13 @@ node_modules/
 
 # Build outputs
 dist/
+web/dist/
 build/
 release/
+mac-installer/
+windows-installer/
+release-publish/
+downloaded-artifacts/
 coverage/
 
 # Python
@@ -26,6 +31,7 @@ ENV/
 .env
 .env.*
 !.env.example
+.codex/
 
 # Logs
 *.log

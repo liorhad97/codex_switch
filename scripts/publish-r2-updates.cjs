@@ -32,7 +32,9 @@ function candidateReleaseDirs() {
     return [path.resolve(rootDir, process.env.CODEX_SWITCH_RELEASE_DIR)];
   }
 
-  return ["release", "mac-installer", "windows-installer"].map((dirName) => path.join(rootDir, dirName));
+  return ["release", "mac-installer", "windows-installer", "linux-installer"].map((dirName) =>
+    path.join(rootDir, dirName)
+  );
 }
 
 function listReleaseFiles() {
@@ -94,6 +96,13 @@ function metadataFor(fileName) {
     };
   }
 
+  if (lower.endsWith(".appimage")) {
+    return {
+      contentType: "application/x-executable",
+      cacheControl: "public, max-age=31536000, immutable"
+    };
+  }
+
   if (lower.endsWith(".blockmap")) {
     return {
       contentType: "application/octet-stream",
@@ -109,7 +118,7 @@ function metadataFor(fileName) {
 const releaseFiles = listReleaseFiles();
 
 if (releaseFiles.length === 0) {
-  fail("No release files found in release/, mac-installer/, or windows-installer/.");
+  fail("No release files found in release/, mac-installer/, windows-installer/, or linux-installer/.");
 }
 
 for (const releaseFile of releaseFiles) {

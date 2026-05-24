@@ -322,7 +322,10 @@ function startBackend(port) {
   const backend = getBackendLaunchConfig(port);
   backendProcess = spawn(backend.command, backend.args, {
     cwd: backend.cwd,
-    env: process.env,
+    env: {
+      ...process.env,
+      CODEX_SWITCH_APP_VERSION: app.getVersion()
+    },
     stdio: app.isPackaged ? "ignore" : "inherit",
     windowsHide: true
   });

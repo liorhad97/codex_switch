@@ -26,6 +26,8 @@ module.exports = {
   mac: {
     icon: "electron/assets/codex-switch-icon.icns",
     forceCodeSigning: true,
+    hardenedRuntime: true,
+    notarize: true,
     target: [
       "dmg",
       "zip"
@@ -38,6 +40,14 @@ module.exports = {
       "nsis",
       "zip"
     ]
+  },
+  linux: {
+    icon: "electron/assets/codex-switch-icon.png",
+    target: [
+      "AppImage",
+      "zip"
+    ],
+    category: "Utility"
   },
   nsis: {
     oneClick: false,
