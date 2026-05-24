@@ -123,6 +123,11 @@ class FakeLicenseManager:
         return self.current_state()
 
 
+class FailingActivationLicenseManager(FakeLicenseManager):
+    def activate(self, license_key: str) -> dict[str, object]:  # noqa: ARG002
+        raise RuntimeError("license file is read-only")
+
+
 class SwitcherServerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -328,6 +333,41 @@ class SwitcherServerTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 403)
         self.assertFalse(payload["license"]["licensed"])
         self.assertEqual(payload["code"], "missing")
+
+    def test_license_activation_unexpected_error_returns_json(self) -> None:
+        server = SwitcherServer(
+            ("127.0.0.1", 0),
+            static_root=self.static_root,
+            store=self.store,
+            oauth_manager=FakeOAuthManager(),
+            license_manager=FailingActivationLicenseManager(licensed=False),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = urllib_request.Request(
+                f"http://127.0.0.1:{server.server_address[1]}/api/license/activate",
+                data=json.dumps({"license_key": "CSW-TEST1-TEST2-TEST3-TEST4"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(urllib_error.HTTPError) as raised:
+                urllib_request.urlopen(request, timeout=2)
+            error_response = raised.exception
+            try:
+                payload = json.loads(error_response.read().decode("utf-8"))
+            finally:
+                error_response.close()
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+
+        self.assertEqual(raised.exception.code, 500)
+        self.assertEqual(payload["code"], "activation_failed")
+        self.assertEqual(payload["error"], "The local backend could not complete activation.")
+        self.assertIn("read-only", payload["detail"])
+        self.assertFalse(payload["license"]["licensed"])
 
     def test_remove_account_clears_selection_and_deletes_profile(self) -> None:
         account, _config = self.store.add_local_account("Local alpha")

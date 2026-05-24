@@ -5,16 +5,24 @@ const updaterBridge = typeof window !== "undefined" ? window.codexSwitchUpdater 
 const shellBridge = typeof window !== "undefined" ? window.codexSwitchShell || null : null;
 
 async function request(path, options = {}) {
-  const response = await fetch(path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    },
-    ...options
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      },
+      ...options
+    });
+  } catch (err) {
+    const error = new Error("Could not reach the local Codex Switch backend. Quit and reopen Codex Switch, then retry.");
+    error.cause = err;
+    throw error;
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(payload.error || `Request failed: ${response.status}`);
+    const detail = payload.detail ? ` ${payload.detail}` : "";
+    const error = new Error(`${payload.error || `Request failed: ${response.status}`}${detail}`);
     error.payload = payload;
     throw error;
   }

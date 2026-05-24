@@ -119,6 +119,17 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
                     status=_http_status(error.status),
                 )
                 return
+            except Exception as error:  # noqa: BLE001
+                self._send_json(
+                    {
+                        "error": "The local backend could not complete activation.",
+                        "code": "activation_failed",
+                        "detail": _format_local_backend_error(error),
+                        "license": self._safe_license_state(),
+                    },
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
             self._send_json({"license": state})
             return
 
@@ -133,6 +144,17 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
                         "license": self.switcher.license.current_state(refresh=False),
                     },
                     status=_http_status(error.status),
+                )
+                return
+            except Exception as error:  # noqa: BLE001
+                self._send_json(
+                    {
+                        "error": "The local backend could not check the license.",
+                        "code": "license_check_failed",
+                        "detail": _format_local_backend_error(error),
+                        "license": self._safe_license_state(),
+                    },
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
                 )
                 return
             self._send_json({"license": state})
@@ -343,6 +365,16 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
             status=HTTPStatus.FORBIDDEN,
         )
         return False
+
+    def _safe_license_state(self) -> dict[str, Any]:
+        try:
+            return self.switcher.license.current_state(refresh=False)
+        except Exception as error:  # noqa: BLE001
+            return {
+                "licensed": False,
+                "status": "unknown",
+                "message": f"Could not read license state: {_format_local_backend_error(error)}",
+            }
 
 
 class SwitcherServer(ThreadingHTTPServer):
@@ -667,6 +699,13 @@ def _http_status(value: int) -> HTTPStatus:
         return HTTPStatus(value)
     except ValueError:
         return HTTPStatus.BAD_REQUEST
+
+
+def _format_local_backend_error(error: Exception) -> str:
+    message = str(error).strip() or error.__class__.__name__
+    if len(message) > 240:
+        return f"{message[:237]}..."
+    return message
 
 
 def _query_flag(query: dict[str, list[str]], key: str) -> bool:
