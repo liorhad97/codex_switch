@@ -298,7 +298,11 @@ function getStaticRoot() {
 
 function getPackagedBackendPath() {
   const executableName = process.platform === "win32" ? "codex-switch-backend.exe" : "codex-switch-backend";
-  return path.join(process.resourcesPath, "backend", executableName);
+  const onefilePath = path.join(process.resourcesPath, "backend", executableName);
+  if (fs.existsSync(onefilePath) && fs.statSync(onefilePath).isFile()) {
+    return onefilePath;
+  }
+  return path.join(process.resourcesPath, "backend", "codex-switch-backend", executableName);
 }
 
 function getBackendLaunchConfig(port) {

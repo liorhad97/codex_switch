@@ -6,7 +6,15 @@ const rootDir = path.resolve(__dirname, "..");
 const backendName = "codex-switch-backend";
 const backendExecutable = process.platform === "win32" ? `${backendName}.exe` : backendName;
 const backendDistDir = path.join(rootDir, "dist", "backend");
-const backendOutputPath = path.join(backendDistDir, backendExecutable);
+const backendOutputCandidates =
+  process.platform === "darwin"
+    ? [
+        path.join(backendDistDir, backendName, backendExecutable),
+        path.join(backendDistDir, backendExecutable)
+      ]
+    : [path.join(backendDistDir, backendExecutable)];
+const backendModeArgs = process.platform === "darwin" ? ["--onedir"] : ["--onefile"];
+const runtimeTmpDirArgs = process.platform === "linux" ? ["--runtime-tmpdir", "/tmp"] : [];
 
 function pythonCandidates() {
   if (process.env.PYTHON) {
@@ -73,7 +81,8 @@ run(python.command, [
   "PyInstaller",
   "--noconfirm",
   "--clean",
-  "--onefile",
+  ...backendModeArgs,
+  ...runtimeTmpDirArgs,
   "--name",
   backendName,
   "--distpath",
@@ -85,8 +94,9 @@ run(python.command, [
   "main.py"
 ]);
 
-if (!fs.existsSync(backendOutputPath)) {
-  console.error(`Expected backend executable was not created: ${backendOutputPath}`);
+const backendOutputPath = backendOutputCandidates.find((candidate) => fs.existsSync(candidate));
+if (!backendOutputPath) {
+  console.error(`Expected backend executable was not created. Checked:\n${backendOutputCandidates.join("\n")}`);
   process.exit(1);
 }
 
