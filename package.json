@@ -15,9 +15,6 @@
     "dist:win": "npm run web:build && npm run build:backend && electron-builder --config electron-builder.config.cjs --win -c.directories.output=windows-installer --publish never",
     "dist:linux": "npm run web:build && npm run build:backend && electron-builder --config electron-builder.config.cjs --linux -c.directories.output=linux-installer --publish never",
     "publish:updates": "node scripts/publish-r2-updates.cjs",
-    "license:generate-signing-key": "node scripts/generate-license-signing-key.cjs",
-    "license:admin": "node scripts/license-admin.cjs",
-    "test:license-worker": "node --test workers/license-worker/src/*.test.mjs",
     "test:web-build": "vite build"
   },
   "codexSwitch": {

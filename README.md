@@ -20,6 +20,7 @@ It does:
 
 It does not:
 
+- require a Codex Switch license key or activation login before opening the app
 - copy browser cookies, local storage, or Keychain items
 - write into the default Codex Electron user-data profile under `~/Library/Application Support/Codex`
 
@@ -121,52 +122,6 @@ npm run publish:updates
 
 The app checks for updates on launch, shows an update card inside the UI, downloads on demand, and then restarts into the new version after `Restart to Update`.
 
-## License Activation
-
-Codex Switch now supports a remote one-installation-per-key activation gate. The desktop backend blocks account APIs until a valid signed license lease exists in `~/codex_switch_data/license.json`; the raw license key is never stored locally.
-
-The license authority is a Cloudflare Worker with D1:
-
-```bash
-cd /Users/liorhadad/codex_switch
-npm run license:generate-signing-key
-npx wrangler d1 create codex-switch-license
-```
-
-Copy the returned D1 database ID into `wrangler.license.toml`. Put the generated public JWK in `codex_profile_switcher/license_config.py`, and set `DEFAULT_LICENSE_API_BASE` to the deployed Worker URL before building the app.
-
-Set Worker secrets:
-
-```bash
-npx wrangler secret put LICENSE_PRIVATE_JWK --config wrangler.license.toml
-npx wrangler secret put LICENSE_KEY_PEPPER --config wrangler.license.toml
-npx wrangler secret put ADMIN_TOKEN --config wrangler.license.toml
-```
-
-Apply the D1 schema and deploy:
-
-```bash
-npx wrangler d1 migrations apply codex-switch-license --remote --config wrangler.license.toml
-npx wrangler deploy --config wrangler.license.toml
-```
-
-Generate manual key batches after deployment:
-
-```bash
-CODEX_SWITCH_LICENSE_API_BASE=https://your-worker-url \
-CODEX_SWITCH_LICENSE_ADMIN_TOKEN=your-admin-token \
-npm run license:admin -- generate --count 25 --notes "launch batch"
-```
-
-Support actions are available with the same admin command:
-
-```bash
-npm run license:admin -- revoke --key CSW-XXXXX-XXXXX-XXXXX-XXXXX
-npm run license:admin -- reset --key CSW-XXXXX-XXXXX-XXXXX-XXXXX
-```
-
-Reset frees a key for a legitimate reinstall. Revoke blocks future refreshes; already-running apps stop once they refresh or their 7-day lease expires.
-
 ## Backend Only
 
 ```bash
@@ -179,6 +134,5 @@ python3 /Users/liorhadad/codex_switch/main.py
 ```bash
 cd /Users/liorhadad/codex_switch
 python3 -m unittest discover -s tests -v
-npm run test:license-worker
 npm run web:build
 ```

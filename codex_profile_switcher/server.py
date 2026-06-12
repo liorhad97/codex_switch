@@ -17,7 +17,6 @@ from urllib import error as urllib_error
 from urllib.parse import parse_qs, urlsplit
 from urllib import request as urllib_request
 
-from .license import LicenseError, LicenseManager
 from .launcher import (
     build_codex_launch_command,
     build_codex_isolated_launch_command,
@@ -85,14 +84,6 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/health":
             self._send_json({"ok": True})
             return
-        if parsed.path == "/api/license":
-            query = parse_qs(parsed.query)
-            self._send_json(
-                {"license": self.switcher.license.current_state(refresh=_query_flag(query, "refresh"))}
-            )
-            return
-        if parsed.path.startswith("/api/") and not self._ensure_licensed():
-            return
         if parsed.path == "/api/state":
             query = parse_qs(parsed.query)
             self._send_json(self.switcher.build_state(refresh_usage=_query_flag(query, "refresh_usage")))
@@ -104,65 +95,6 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
-        if path == "/api/license/activate":
-            payload = self._read_json_body()
-            license_key = payload.get("license_key")
-            try:
-                state = self.switcher.license.activate(license_key if isinstance(license_key, str) else "")
-            except LicenseError as error:
-                self._send_json(
-                    {
-                        "error": error.message,
-                        "code": error.code,
-                        "license": self.switcher.license.current_state(refresh=False),
-                    },
-                    status=_http_status(error.status),
-                )
-                return
-            except Exception as error:  # noqa: BLE001
-                self._send_json(
-                    {
-                        "error": "The local backend could not complete activation.",
-                        "code": "activation_failed",
-                        "detail": _format_local_backend_error(error),
-                        "license": self._safe_license_state(),
-                    },
-                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
-                )
-                return
-            self._send_json({"license": state})
-            return
-
-        if path == "/api/license/check":
-            try:
-                state = self.switcher.license.refresh_license()
-            except LicenseError as error:
-                self._send_json(
-                    {
-                        "error": error.message,
-                        "code": error.code,
-                        "license": self.switcher.license.current_state(refresh=False),
-                    },
-                    status=_http_status(error.status),
-                )
-                return
-            except Exception as error:  # noqa: BLE001
-                self._send_json(
-                    {
-                        "error": "The local backend could not check the license.",
-                        "code": "license_check_failed",
-                        "detail": _format_local_backend_error(error),
-                        "license": self._safe_license_state(),
-                    },
-                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
-                )
-                return
-            self._send_json({"license": state})
-            return
-
-        if path.startswith("/api/") and not self._ensure_licensed():
-            return
-
         if path == "/api/accounts/add":
             payload = self._read_json_body()
             label = payload.get("label")
@@ -294,8 +226,6 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
-        if path.startswith("/api/") and not self._ensure_licensed():
-            return
         account_match = re.fullmatch(r"/api/accounts/([^/]+)", path)
         if account_match:
             try:
@@ -352,30 +282,6 @@ class SwitcherRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
-    def _ensure_licensed(self) -> bool:
-        state = self.switcher.license.current_state(refresh=False)
-        if state.get("licensed") is True:
-            return True
-        self._send_json(
-            {
-                "error": state.get("message") or "Activation required.",
-                "code": state.get("status") or "activation_required",
-                "license": state,
-            },
-            status=HTTPStatus.FORBIDDEN,
-        )
-        return False
-
-    def _safe_license_state(self) -> dict[str, Any]:
-        try:
-            return self.switcher.license.current_state(refresh=False)
-        except Exception as error:  # noqa: BLE001
-            return {
-                "licensed": False,
-                "status": "unknown",
-                "message": f"Could not read license state: {_format_local_backend_error(error)}",
-            }
-
 
 class SwitcherServer(ThreadingHTTPServer):
     def __init__(
@@ -384,11 +290,9 @@ class SwitcherServer(ThreadingHTTPServer):
         static_root: Path,
         store: ProfileStore,
         oauth_manager: AccountOAuthManager | None = None,
-        license_manager: LicenseManager | None = None,
     ) -> None:
         self.static_root = static_root
         self.store = store
-        self.license = license_manager or LicenseManager(store.paths.data_root)
         self._codex_binary = _resolve_codex_binary(store)
         self.oauth = oauth_manager or AccountOAuthManager(
             store=store,
@@ -692,13 +596,6 @@ def _find_account(accounts: list[AccountRecord], account_id: str) -> AccountReco
         if account.id == account_id:
             return account
     raise ValueError(f"Unknown account: {account_id}")
-
-
-def _http_status(value: int) -> HTTPStatus:
-    try:
-        return HTTPStatus(value)
-    except ValueError:
-        return HTTPStatus.BAD_REQUEST
 
 
 def _format_local_backend_error(error: Exception) -> str:

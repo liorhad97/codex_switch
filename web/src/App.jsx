@@ -608,84 +608,11 @@ function PendingSignInOverlay({ flow, onOpen, onCancel, cancelBusy = false }) {
   );
 }
 
-function ActivationScreen({
-  licenseState,
-  licenseKey,
-  licenseFeedback,
-  loading,
-  busy,
-  onLicenseKeyChange,
-  onActivate,
-  onRetry
-}) {
-  const configured = Boolean(licenseState?.api_configured && licenseState?.public_key_configured);
-  const status = licenseState?.status || "checking";
-  const message = loading
-    ? "Checking activation..."
-    : licenseState?.message || "Enter your license key to activate Codex Switch.";
-  const feedback = licenseFeedback || (!configured && !loading ? "Activation is not configured for this build." : "");
-
-  return (
-    <main className="license-screen">
-      <section className="license-panel" aria-busy={loading || busy}>
-        <div className="license-brand">CS</div>
-        <p className="relay-main-label">Codex Switch</p>
-        <h1 className="license-title">Activate your license</h1>
-        <p className="license-copy">{message}</p>
-        <form className="license-form" onSubmit={onActivate}>
-          <label className="license-label" htmlFor="license-key">License key</label>
-          <input
-            id="license-key"
-            type="text"
-            className="license-input"
-            value={licenseKey}
-            onChange={(event) => onLicenseKeyChange(event.target.value)}
-            placeholder="CSW-XXXXX-XXXXX-XXXXX-XXXXX"
-            autoComplete="off"
-            spellCheck="false"
-            disabled={loading || busy || !configured}
-          />
-          <div className="license-actions">
-            <button
-              type="submit"
-              className="relay-account-action relay-account-action-primary"
-              disabled={loading || busy || !configured || !licenseKey.trim()}
-            >
-              {busy ? "Activating..." : "Activate"}
-            </button>
-            <button
-              type="button"
-              className="relay-account-action"
-              onClick={onRetry}
-              disabled={loading || busy}
-            >
-              {loading ? "Checking..." : "Retry Check"}
-            </button>
-          </div>
-        </form>
-        {feedback ? (
-          <div className="relay-feedback relay-feedback-warn" role="alert">
-            {feedback}
-          </div>
-        ) : null}
-        <div className="license-meta">
-          <span>{status.replaceAll("_", " ")}</span>
-          {licenseState?.install_id_suffix ? <span>Install {licenseState.install_id_suffix}</span> : null}
-        </div>
-      </section>
-    </main>
-  );
-}
-
 function App() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState(null);
   const [feedback, setFeedback] = useState("");
-  const [licenseState, setLicenseState] = useState(null);
-  const [licenseLoading, setLicenseLoading] = useState(true);
-  const [licenseKey, setLicenseKey] = useState("");
-  const [licenseFeedback, setLicenseFeedback] = useState("");
   const [updateState, setUpdateState] = useState(() =>
     updaterBridge
       ? null
@@ -711,30 +638,6 @@ function App() {
     usagePollRef.current.timeouts = [];
   };
 
-  const loadLicense = async ({ refresh = false, silent = false } = {}) => {
-    if (!silent) {
-      setLicenseLoading(true);
-    }
-    try {
-      const payload = await request(`/api/license${refresh ? "?refresh=1" : ""}`);
-      const nextLicense = payload.license || payload;
-      setLicenseState(nextLicense);
-      setLicenseFeedback("");
-      return nextLicense;
-    } catch (err) {
-      const nextLicense = err.payload?.license || null;
-      if (nextLicense) {
-        setLicenseState(nextLicense);
-      }
-      setLicenseFeedback(err.message);
-      return nextLicense;
-    } finally {
-      if (!silent) {
-        setLicenseLoading(false);
-      }
-    }
-  };
-
   const loadState = async () => {
     setLoading(true);
     try {
@@ -742,10 +645,6 @@ function App() {
       setState(payload);
       setFeedback("");
     } catch (err) {
-      if (err.payload?.license) {
-        setLicenseState(err.payload.license);
-        setState(null);
-      }
       setFeedback(err.message);
     } finally {
       setLoading(false);
@@ -753,40 +652,8 @@ function App() {
   };
 
   useEffect(() => {
-    loadLicense({ refresh: true }).then((nextLicense) => {
-      if (nextLicense?.licensed) {
-        void loadState();
-      } else {
-        setLoading(false);
-      }
-    });
+    void loadState();
   }, []);
-
-  useEffect(() => {
-    if (!licenseState?.licensed) {
-      return undefined;
-    }
-
-    const intervalId = window.setInterval(async () => {
-      try {
-        const payload = await request("/api/license/check", { method: "POST" });
-        const nextLicense = payload.license || payload;
-        setLicenseState(nextLicense);
-        if (!nextLicense?.licensed) {
-          setState(null);
-        }
-      } catch (err) {
-        if (err.payload?.license) {
-          setLicenseState(err.payload.license);
-          if (!err.payload.license.licensed) {
-            setState(null);
-          }
-        }
-      }
-    }, 6 * 60 * 60 * 1000);
-
-    return () => window.clearInterval(intervalId);
-  }, [licenseState?.licensed]);
 
   useEffect(() => {
     if (loading || !state || startupRepairRef.current) {
@@ -842,24 +709,17 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!licenseState?.licensed) {
-      return undefined;
-    }
-
     const intervalId = window.setInterval(async () => {
       try {
         const payload = await request("/api/state?refresh_usage=1");
         setState(payload);
-      } catch (err) {
-        if (err.payload?.license) {
-          setLicenseState(err.payload.license);
-        }
+      } catch {
         // Keep the last known usage and try again on the next minute.
       }
     }, USAGE_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
-  }, [licenseState?.licensed]);
+  }, []);
 
   const runAction = async (key, callback) => {
     setBusyKey(key);
@@ -869,39 +729,8 @@ function App() {
       setFeedback("");
       return payload;
     } catch (err) {
-      if (err.payload?.license) {
-        setLicenseState(err.payload.license);
-        if (!err.payload.license.licensed) {
-          setState(null);
-        }
-      }
       setFeedback(err.message);
       throw err;
-    } finally {
-      setBusyKey(null);
-    }
-  };
-
-  const activateLicense = async (event) => {
-    event.preventDefault();
-    setBusyKey("activate-license");
-    setLicenseFeedback("");
-    try {
-      const payload = await request("/api/license/activate", {
-        method: "POST",
-        body: JSON.stringify({ license_key: licenseKey })
-      });
-      const nextLicense = payload.license || payload;
-      setLicenseState(nextLicense);
-      if (nextLicense?.licensed) {
-        setLicenseKey("");
-        await loadState();
-      }
-    } catch (err) {
-      if (err.payload?.license) {
-        setLicenseState(err.payload.license);
-      }
-      setLicenseFeedback(err.message);
     } finally {
       setBusyKey(null);
     }
@@ -1218,22 +1047,6 @@ function App() {
   const vscodeBusy = busyKey === `launch-vscode:${selectedAccount?.id}`;
   const updateNeedsAttention = updateState?.phase === "available" || updateState?.phase === "downloaded";
   const installingUpdate = busyKey === "install-update" || updateState?.phase === "installing";
-  const activatingLicense = busyKey === "activate-license";
-
-  if (!licenseState?.licensed) {
-    return (
-      <ActivationScreen
-        licenseState={licenseState}
-        licenseKey={licenseKey}
-        licenseFeedback={licenseFeedback}
-        loading={licenseLoading}
-        busy={activatingLicense}
-        onLicenseKeyChange={setLicenseKey}
-        onActivate={activateLicense}
-        onRetry={() => void loadLicense({ refresh: true })}
-      />
-    );
-  }
 
   return (
     <div className="app-frame" aria-busy={loading}>
