@@ -1,118 +1,101 @@
-# codex switch
+# Codex Switch
 
-This project now runs as a small Electron shell with a Python backend and a React frontend for switching between isolated Codex accounts.
+Codex Switch is a small desktop app for managing multiple isolated Codex accounts from one place. It shows account status, remaining usage windows, and lets you open the selected account in Codex Desktop, an isolated Codex app profile, or Codex VS Code.
 
-It does:
+![Codex Switch account dashboard](docs/assets/codex-switch-screenshot.png)
 
-- discover accounts only from `~/llm_accounts_profiles/codex/profiles` and cache metadata in `~/codex_switch_data/accounts.json`
-- start new local accounts with the same pending browser sign-in flow pattern used by `flutty_orc`
-- persist newly added accounts into `~/codex_switch_data/accounts.json` only after the ChatGPT sign-in completes
-- create isolated account homes and copied credential files directly under `~/llm_accounts_profiles/codex/profiles/<account-id>/home`
-- render the UI from `~/codex_switch_data`
-- persist its own primary-account selection in `~/codex_switch_data/config.json`
-- copy the selected account's `.codex/auth.json` into the main Codex home at `~/.codex/auth.json` when Set Primary is clicked
-- merge live account rate-limit usage from a running `flutty_orc` instance when available
-- map accounts to prepared isolated Codex user-data directories under `~/llm_accounts_profiles/codex/profiles`
-- auto-mark newly connected local accounts as primary in the switcher
-- launch a selected account in an isolated Codex app profile with `--user-data-dir=<prepared dir>` without closing the current Codex session
-- reopen the main Codex Desktop profile without closing isolated Codex app profiles
-- force normal Codex Desktop launches to the main `~/.codex` workspace state, not an isolated account's `home/.codex` state
+## Highlights
 
-It does not:
+- Switch between prepared Codex account homes under `~/llm_accounts_profiles/codex/profiles`.
+- See live usage windows when account data is available.
+- Add local accounts through the normal ChatGPT/Codex sign-in flow.
+- Set a primary account by copying the selected `.codex/auth.json` into the main Codex home.
+- Open accounts in isolated Codex Desktop profiles without closing your current Codex session.
+- Open the selected account in Codex VS Code.
+- Run without a Codex Switch license key, activation server, or startup login gate.
 
-- require a Codex Switch license key or activation login before opening the app
-- copy browser cookies, local storage, or Keychain items
-- write into the default Codex Electron user-data profile under `~/Library/Application Support/Codex`
+## How It Works
 
-## Install and Run
+Codex Switch is built from three pieces:
+
+- Electron shell: starts the local backend, hosts the desktop window, and manages updater actions.
+- Python backend: discovers accounts, prepares profile homes, launches Codex, and serves the local API.
+- React frontend: renders the account dashboard, usage cards, sign-in state, diagnostics, and update controls.
+
+The app stores its own metadata in `~/codex_switch_data` and keeps account profiles in `~/llm_accounts_profiles/codex/profiles`. It does not copy browser cookies, local storage, or Keychain items.
+
+## Requirements
+
+- Node.js and npm
+- Python 3
+- Codex Desktop or a compatible Codex CLI install
+- PyInstaller, only when building packaged desktop apps
+
+## Quick Start
 
 ```bash
-cd /Users/liorhadad/codex_switch
+git clone https://github.com/liorhad97/codex_switch.git
+cd codex_switch
 npm install
 npm run electron
 ```
 
-## Build Downloadable Apps
-
-The app is packaged with Electron Builder. The React UI is compiled into `web/dist`, the Python backend is compiled into a standalone executable with PyInstaller, `npm run dist` writes generic output to `release/`, and the platform-specific installer commands write to `mac-installer/` and `windows-installer/`.
-
-Install the build tools once:
+For backend-only development:
 
 ```bash
-cd /Users/liorhadad/codex_switch
+python3 main.py
+```
+
+## Development
+
+Run the local backend against the built web UI:
+
+```bash
+npm run web:build
+npm run backend
+```
+
+Run tests:
+
+```bash
+python3 -m unittest discover -s tests -v
+npm run web:build
+```
+
+## Packaging
+
+Install packaging dependencies once:
+
+```bash
 npm install
 python3 -m pip install pyinstaller
 ```
 
-Build the Mac app on macOS:
+Build installers:
 
 ```bash
 npm run dist:mac
-```
-
-Build the Windows app on Windows:
-
-```powershell
 npm run dist:win
+npm run dist:linux
 ```
 
-You normally cannot build the Windows backend executable correctly from macOS. Use a Windows machine, or run the included GitHub Actions workflow from the Actions tab to build both macOS and Windows artifacts.
-
-If PyInstaller is installed under a specific Python version, pass it explicitly:
+Windows backend packaging should be done on Windows. If PyInstaller is installed under a specific Python version, pass it explicitly:
 
 ```bash
 PYTHON=python3.12 npm run dist:mac
 ```
 
-## Auto Updates
+## Updates
 
-The packaged desktop app now supports in-app update checks using `electron-updater` with Cloudflare R2 as the generic static host. This works well with a private source repo because only the built artifacts need to be published.
+Packaged builds use `electron-updater` with a generic Cloudflare R2 update feed. The default update bucket and base URL are configured in `package.json`.
 
-This repo is now wired to publish updater files to:
-
-- bucket: `codex-switch-updates`
-- public URL: `https://pub-1fc6be6e977a4adf8a928d5e615d8f54.r2.dev`
-
-Release publishing uploads:
-
-- `latest.yml`
-- `latest-mac.yml`
-- generated `.exe`, `.zip`, `.dmg`, and `.blockmap` artifacts
-
-Publish the generated installer outputs to R2 with:
+Publish generated updater artifacts with:
 
 ```bash
 npm run publish:updates
 ```
 
-The GitHub Actions workflow builds both macOS and Windows apps and then publishes the resulting updater artifacts to R2. It runs on:
-
-- pushes to `main`
-- `v*` tags
-- manual runs from the Actions tab
-
-For normal `main` commits and manual runs, the workflow stamps the build with a unique updater version using the package major/minor plus the GitHub run number so Electron clients see it as a newer release. For `v*` tags, the tag version is used. Add this repository secret before using the workflow:
-
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
-
-macOS updater releases must be signed with an Apple Developer ID Application certificate and notarized through Apple. Without stable Developer ID signing, Squirrel/Mac rejects `Restart to Update` with a code-signature validation error because each ad-hoc build has a different code hash. Without notarization, downloaded builds can trigger Gatekeeper warnings that macOS cannot verify the app. The workflow imports `CSC_LINK` into a temporary keychain, refuses self-signed/ad-hoc release builds, notarizes through App Store Connect, and validates the stapled app before publishing update artifacts. Add these repository secrets before publishing macOS updates:
-
-- `CSC_LINK`: base64-encoded exported code-signing `.p12`, or a private URL to it
-- `CSC_KEY_PASSWORD`: password for the exported `.p12`
-- `APPLE_API_KEY_P8`: contents of the App Store Connect team API key `.p8`
-- `APPLE_API_KEY_ID`: App Store Connect API key ID
-- `APPLE_API_ISSUER`: App Store Connect issuer ID
-
-Instead of `APPLE_API_KEY_P8`, you may set `APPLE_API_KEY_BASE64` to a base64-encoded `.p8` file. Create the key in App Store Connect under Users and Access -> Integrations -> App Store Connect API, choose a Team Key, and grant App Manager access. The legacy Apple ID notarization path is still supported with these secrets if an API key is not configured:
-
-- `APPLE_ID`
-- `APPLE_APP_SPECIFIC_PASSWORD`
-- `APPLE_TEAM_ID`
-
-If users already installed an ad-hoc-signed build, they may need one manual reinstall from the first stably signed `.dmg`; future updates signed by the same certificate can then install normally.
-
-You can still override the defaults if you move to another bucket or custom domain:
+You can override the upload target:
 
 ```bash
 CODEX_SWITCH_R2_BUCKET=another-bucket \
@@ -120,19 +103,29 @@ CODEX_SWITCH_UPDATE_BASE_URL=https://downloads.example.com \
 npm run publish:updates
 ```
 
-The app checks for updates on launch, shows an update card inside the UI, downloads on demand, and then restarts into the new version after `Restart to Update`.
+macOS update builds should be signed with a stable Apple Developer ID certificate and notarized. Configure the relevant GitHub Actions secrets before publishing macOS releases:
 
-## Backend Only
+- `CSC_LINK`
+- `CSC_KEY_PASSWORD`
+- `APPLE_API_KEY_P8` or `APPLE_API_KEY_BASE64`
+- `APPLE_API_KEY_ID`
+- `APPLE_API_ISSUER`
 
-```bash
-cd /Users/liorhadad/codex_switch
-python3 /Users/liorhadad/codex_switch/main.py
+## Project Layout
+
+```text
+codex_profile_switcher/  Python backend and account/profile logic
+electron/                Electron main process, preload bridge, and assets
+web/src/                 React frontend
+scripts/                 Build, publishing, and smoke-test helpers
+tests/                   Python unit tests
+docs/assets/             README and documentation images
 ```
 
-## Tests
+## Privacy Notes
 
-```bash
-cd /Users/liorhadad/codex_switch
-python3 -m unittest discover -s tests -v
-npm run web:build
-```
+Codex Switch works with local account profile folders and Codex auth files. It does not bypass Codex authentication, collect account credentials, or transfer browser session data. Each new account still signs in through the regular ChatGPT/Codex flow.
+
+## License
+
+Choose and add an open-source license before publishing this repository for outside contributors.
