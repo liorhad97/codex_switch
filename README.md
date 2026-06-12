@@ -104,6 +104,16 @@ docs/assets/             README and documentation images
 
 Codex Switch works with local account profile folders and Codex auth files. It does not bypass Codex authentication, collect account credentials, or transfer browser session data. Each new account still signs in through the regular ChatGPT/Codex flow.
 
+## Disclaimer
+
+Codex Switch is provided for research, educational, and personal productivity purposes. It is not affiliated with OpenAI, ChatGPT, Codex, Apple, Microsoft, GitHub, or any other service provider mentioned in this repository.
+
+Use this software at your own risk. The maintainers and contributors are not responsible for account issues, lost data, rate-limit changes, service interruptions, security incidents, policy violations, or any other damages or losses that may result from using, modifying, building, or distributing this project.
+
+Users are solely responsible for complying with all applicable laws, platform terms, account policies, workplace rules, and third-party rights. Do not use this project to bypass access controls, impersonate another person, abuse services, scrape data without permission, or violate any terms of service.
+
+The software is provided "as is", without warranties of any kind. This disclaimer is not legal advice; consult a qualified legal professional for questions about licensing, compliance, or liability.
+
 ## Open Source
 
 Codex Switch has no commercial activation key or paid license gate. Add a `LICENSE` file when you are ready to declare the project’s open-source license terms.
