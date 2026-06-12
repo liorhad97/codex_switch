@@ -2,7 +2,6 @@
   "name": "codex-switch",
   "productName": "codex switch",
   "version": "0.1.23",
-  "private": true,
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -14,13 +13,7 @@
     "dist:mac": "npm run web:build && npm run build:backend && electron-builder --config electron-builder.config.cjs --mac -c.directories.output=mac-installer --publish never",
     "dist:win": "npm run web:build && npm run build:backend && electron-builder --config electron-builder.config.cjs --win -c.directories.output=windows-installer --publish never",
     "dist:linux": "npm run web:build && npm run build:backend && electron-builder --config electron-builder.config.cjs --linux -c.directories.output=linux-installer --publish never",
-    "publish:updates": "node scripts/publish-r2-updates.cjs",
     "test:web-build": "vite build"
-  },
-  "codexSwitch": {
-    "updateBaseUrlEnv": "CODEX_SWITCH_UPDATE_BASE_URL",
-    "defaultUpdateBaseUrl": "https://pub-1fc6be6e977a4adf8a928d5e615d8f54.r2.dev",
-    "defaultR2Bucket": "codex-switch-updates"
   },
   "dependencies": {
     "electron-updater": "^6.8.3",
@@ -32,7 +25,6 @@
     "electron": "^37.2.0",
     "electron-builder": "^26.8.1",
     "playwright": "^1.59.1",
-    "vite": "^7.0.0",
-    "wrangler": "^4.85.0"
+    "vite": "^7.0.0"
   }
 }

@@ -85,31 +85,9 @@ Windows backend packaging should be done on Windows. If PyInstaller is installed
 PYTHON=python3.12 npm run dist:mac
 ```
 
-## Updates
+## GitHub Actions
 
-Packaged builds use `electron-updater` with a generic Cloudflare R2 update feed. The default update bucket and base URL are configured in `package.json`.
-
-Publish generated updater artifacts with:
-
-```bash
-npm run publish:updates
-```
-
-You can override the upload target:
-
-```bash
-CODEX_SWITCH_R2_BUCKET=another-bucket \
-CODEX_SWITCH_UPDATE_BASE_URL=https://downloads.example.com \
-npm run publish:updates
-```
-
-macOS update builds should be signed with a stable Apple Developer ID certificate and notarized. Configure the relevant GitHub Actions secrets before publishing macOS releases:
-
-- `CSC_LINK`
-- `CSC_KEY_PASSWORD`
-- `APPLE_API_KEY_P8` or `APPLE_API_KEY_BASE64`
-- `APPLE_API_KEY_ID`
-- `APPLE_API_ISSUER`
+The repository includes a workflow that builds macOS, Windows, and Linux installers and uploads them as GitHub Actions artifacts. No external publishing accounts or platform signing secrets are required.
 
 ## Project Layout
 
@@ -126,6 +104,6 @@ docs/assets/             README and documentation images
 
 Codex Switch works with local account profile folders and Codex auth files. It does not bypass Codex authentication, collect account credentials, or transfer browser session data. Each new account still signs in through the regular ChatGPT/Codex flow.
 
-## License
+## Open Source
 
-Choose and add an open-source license before publishing this repository for outside contributors.
+Codex Switch has no commercial activation key or paid license gate. Add a `LICENSE` file when you are ready to declare the project’s open-source license terms.

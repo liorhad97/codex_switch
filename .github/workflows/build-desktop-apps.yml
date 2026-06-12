@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       platform:
-        description: "Which platform to build for manual update publishing"
+        description: "Which platform to build"
         required: true
         default: "all"
         type: choice
@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: codex-switch-update-${{ github.ref }}
+  group: codex-switch-build-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -38,7 +38,6 @@ jobs:
             os: macos-latest
             script: dist:mac
             artifact_path: |
-              mac-installer/latest-mac.yml
               mac-installer/*.dmg
               mac-installer/*.zip
               mac-installer/*.blockmap
@@ -46,7 +45,6 @@ jobs:
             os: windows-latest
             script: dist:win
             artifact_path: |
-              windows-installer/latest.yml
               windows-installer/*.exe
               windows-installer/*.zip
               windows-installer/*.blockmap
@@ -54,14 +52,12 @@ jobs:
             os: ubuntu-latest
             script: dist:linux
             artifact_path: |
-              linux-installer/latest-linux.yml
               linux-installer/*.AppImage
               linux-installer/*.zip
               linux-installer/*.blockmap
 
     env:
       PYTHON: python
-      CODEX_SWITCH_UPDATE_BASE_URL: https://pub-1fc6be6e977a4adf8a928d5e615d8f54.r2.dev
 
     steps:
       - name: Check out repository
@@ -83,188 +79,7 @@ jobs:
           npm ci
           python -m pip install --upgrade pip pyinstaller
 
-      - name: Require macOS production signing and notarization secrets
-        if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        shell: bash
-        run: |
-          if [[ -z "${CSC_LINK}" || -z "${CSC_KEY_PASSWORD}" ]]; then
-            echo "::error::macOS releases must be signed with an Apple Developer ID Application certificate. Set CSC_LINK and CSC_KEY_PASSWORD to a Developer ID Application .p12 before publishing updates."
-            exit 1
-          fi
-
-          HAS_API_KEY_CONTENT=0
-          HAS_API_KEY_METADATA=0
-          HAS_LEGACY_CREDENTIALS=0
-          HAS_LEGACY_PARTIAL=0
-
-          if [[ -n "${APPLE_API_KEY_P8}" || -n "${APPLE_API_KEY_BASE64}" ]]; then
-            HAS_API_KEY_CONTENT=1
-          fi
-          if [[ -n "${APPLE_API_KEY_ID}" && -n "${APPLE_API_ISSUER}" ]]; then
-            HAS_API_KEY_METADATA=1
-          fi
-          if [[ -n "${APPLE_ID}" && -n "${APPLE_APP_SPECIFIC_PASSWORD}" && -n "${APPLE_TEAM_ID}" ]]; then
-            HAS_LEGACY_CREDENTIALS=1
-          fi
-          if [[ -n "${APPLE_ID}" || -n "${APPLE_APP_SPECIFIC_PASSWORD}" || -n "${APPLE_TEAM_ID}" ]]; then
-            HAS_LEGACY_PARTIAL=1
-          fi
-
-          if [[ "${HAS_API_KEY_CONTENT}" == "1" || -n "${APPLE_API_KEY_ID}" || -n "${APPLE_API_ISSUER}" ]]; then
-            if [[ "${HAS_API_KEY_CONTENT}" != "1" || "${HAS_API_KEY_METADATA}" != "1" ]]; then
-              echo "::error::App Store Connect notarization requires APPLE_API_KEY_P8 or APPLE_API_KEY_BASE64, plus APPLE_API_KEY_ID and APPLE_API_ISSUER."
-              exit 1
-            fi
-          elif [[ "${HAS_LEGACY_CREDENTIALS}" != "1" ]]; then
-            if [[ "${HAS_LEGACY_PARTIAL}" == "1" ]]; then
-              echo "::error::Apple ID notarization requires APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID."
-            else
-              echo "::error::macOS releases must be notarized by Apple. Prefer App Store Connect secrets APPLE_API_KEY_P8, APPLE_API_KEY_ID, and APPLE_API_ISSUER."
-            fi
-            exit 1
-          fi
-
-      - name: Prepare macOS signing keychain
-        if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          KEYCHAIN_PATH="${RUNNER_TEMP}/codex-switch-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
-          CERT_PATH="${RUNNER_TEMP}/codex-switch-signing.p12"
-          CERT_PEM_PATH="${RUNNER_TEMP}/codex-switch-signing.pem"
-
-          export CERT_PATH
-          node <<'NODE'
-          const fs = require("fs");
-          const link = process.env.CSC_LINK || "";
-          const out = process.env.CERT_PATH;
-
-          (async () => {
-            if (/^https?:\/\//i.test(link)) {
-              const response = await fetch(link, { redirect: "follow" });
-              if (!response.ok) {
-                throw new Error(`Failed to download certificate: HTTP ${response.status}`);
-              }
-              fs.writeFileSync(out, Buffer.from(await response.arrayBuffer()), { mode: 0o600 });
-            } else if (fs.existsSync(link)) {
-              fs.copyFileSync(link, out);
-              fs.chmodSync(out, 0o600);
-            } else {
-              const base64 = link.replace(/^data:.*;base64,/i, "").replace(/\s/g, "");
-              fs.writeFileSync(out, Buffer.from(base64, "base64"), { mode: 0o600 });
-            }
-          })().catch((error) => {
-            console.error(error);
-            process.exit(1);
-          });
-          NODE
-
-          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
-          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
-          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
-          EXISTING_KEYCHAINS=()
-          while IFS= read -r keychain; do
-            [[ -n "${keychain}" ]] && EXISTING_KEYCHAINS+=("${keychain}")
-          done < <(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//')
-          security list-keychains -d user -s "${KEYCHAIN_PATH}" "${EXISTING_KEYCHAINS[@]}"
-
-          security import "${CERT_PATH}" -k "${KEYCHAIN_PATH}" -P "${CSC_KEY_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/productbuild
-          security set-key-partition-list -S apple-tool:,apple: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
-          VALID_IDENTITY_COUNT="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | awk '/valid identities found/{print $1}')"
-
-          if [[ "${VALID_IDENTITY_COUNT:-0}" == "0" ]] && openssl pkcs12 -in "${CERT_PATH}" -clcerts -nokeys -passin "pass:${CSC_KEY_PASSWORD}" -out "${CERT_PEM_PATH}" >/dev/null 2>&1; then
-            sudo security add-trusted-cert -d -p codeSign -r trustRoot -k /Library/Keychains/System.keychain "${CERT_PEM_PATH}" >/dev/null 2>&1 &
-            TRUST_PID="$!"
-            for _ in {1..30}; do
-              if ! kill -0 "${TRUST_PID}" >/dev/null 2>&1; then
-                wait "${TRUST_PID}" || true
-                break
-              fi
-              sleep 1
-            done
-            if kill -0 "${TRUST_PID}" >/dev/null 2>&1; then
-              echo "::warning::Timed out while adding system code-signing trust settings; continuing with identity validation."
-              kill "${TRUST_PID}" >/dev/null 2>&1 || true
-              wait "${TRUST_PID}" || true
-            fi
-            VALID_IDENTITY_COUNT="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | awk '/valid identities found/{print $1}')"
-          fi
-
-          security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | tee "${RUNNER_TEMP}/codesign-identities.txt"
-          if [[ "${VALID_IDENTITY_COUNT:-0}" == "0" ]]; then
-            echo "::error::CSC_LINK was imported, but no valid macOS code-signing identity was found. Use an Apple Developer ID Application certificate."
-            exit 1
-          fi
-          if ! grep -q "Developer ID Application:" "${RUNNER_TEMP}/codesign-identities.txt"; then
-            echo "::error::CSC_LINK is not an Apple Developer ID Application certificate. Self-signed certificates cannot be notarized and will trigger Apple's malware verification warning."
-            exit 1
-          fi
-
-          echo "CSC_KEYCHAIN=${KEYCHAIN_PATH}" >> "${GITHUB_ENV}"
-
-      - name: Prepare macOS notarization credentials
-        if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
-        env:
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ -n "${APPLE_API_KEY_P8}" || -n "${APPLE_API_KEY_BASE64}" ]]; then
-            API_KEY_PATH="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
-
-            if [[ -n "${APPLE_API_KEY_BASE64}" ]]; then
-              export API_KEY_PATH APPLE_API_KEY_BASE64
-              node -e 'const fs = require("fs"); const key = (process.env.APPLE_API_KEY_BASE64 || "").replace(/\s/g, ""); fs.writeFileSync(process.env.API_KEY_PATH, Buffer.from(key, "base64"), { mode: 0o600 });'
-            else
-              export API_KEY_PATH APPLE_API_KEY_P8
-              node -e 'const fs = require("fs"); const key = (process.env.APPLE_API_KEY_P8 || "").replace(/\\n/g, "\n"); fs.writeFileSync(process.env.API_KEY_PATH, key, { mode: 0o600 });'
-            fi
-
-            if ! grep -q "BEGIN PRIVATE KEY" "${API_KEY_PATH}"; then
-              echo "::error::The App Store Connect API key secret did not decode to a .p8 private key."
-              exit 1
-            fi
-            if ! openssl pkey -in "${API_KEY_PATH}" -noout >/dev/null 2>&1; then
-              echo "::error::The App Store Connect API key secret is not a valid .p8 private key."
-              exit 1
-            fi
-
-            {
-              echo "APPLE_API_KEY=${API_KEY_PATH}"
-              echo "APPLE_API_KEY_ID=${APPLE_API_KEY_ID}"
-              echo "APPLE_API_ISSUER=${APPLE_API_ISSUER}"
-            } >> "${GITHUB_ENV}"
-          else
-            {
-              echo "APPLE_ID=${APPLE_ID}"
-              echo "APPLE_APP_SPECIFIC_PASSWORD=${APPLE_APP_SPECIFIC_PASSWORD}"
-              echo "APPLE_TEAM_ID=${APPLE_TEAM_ID}"
-            } >> "${GITHUB_ENV}"
-          fi
-
-      - name: Set updater version
+      - name: Set build version
         shell: bash
         run: |
           VERSION="$(node -e '
@@ -289,36 +104,6 @@ jobs:
       - name: Build macOS app
         if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
         run: npm run ${{ matrix.script }}
-
-      - name: Verify macOS app signature
-        if: runner.os == 'macOS' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'macos')
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP_PATH="$(find mac-installer -maxdepth 3 -type d -name "codex switch.app" -print -quit)"
-          if [[ -z "${APP_PATH}" ]]; then
-            echo "::error::Cannot find packaged macOS app to verify."
-            exit 1
-          fi
-
-          codesign --verify --deep --strict --verbose=4 "${APP_PATH}"
-          SIGNATURE_DETAILS="$(codesign -dv --verbose=4 "${APP_PATH}" 2>&1)"
-          echo "${SIGNATURE_DETAILS}"
-          if grep -q "Signature=adhoc" <<<"${SIGNATURE_DETAILS}"; then
-            echo "::error::Packaged macOS app is still ad-hoc signed. Refusing to publish an updater build that ShipIt cannot validate."
-            exit 1
-          fi
-          if ! grep -q "Authority=Developer ID Application:" <<<"${SIGNATURE_DETAILS}"; then
-            echo "::error::Packaged macOS app is not signed with an Apple Developer ID Application certificate."
-            exit 1
-          fi
-          if grep -q "TeamIdentifier=not set" <<<"${SIGNATURE_DETAILS}"; then
-            echo "::error::Packaged macOS app has no Apple TeamIdentifier, so Gatekeeper cannot verify it."
-            exit 1
-          fi
-
-          xcrun stapler validate "${APP_PATH}"
-          spctl --assess --type execute --verbose=4 "${APP_PATH}"
 
       - name: Build Windows app
         if: runner.os == 'Windows' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'windows')
@@ -349,40 +134,3 @@ jobs:
         with:
           name: codex-switch-${{ matrix.name }}
           path: ${{ matrix.artifact_path }}
-
-  publish-updates:
-    name: Publish updates to Cloudflare R2
-    needs: build
-    runs-on: ubuntu-latest
-    env:
-      CODEX_SWITCH_R2_BUCKET: codex-switch-updates
-      CODEX_SWITCH_UPDATE_BASE_URL: https://pub-1fc6be6e977a4adf8a928d5e615d8f54.r2.dev
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release
-          pattern: codex-switch-*
-          merge-multiple: true
-
-      - name: List release artifacts
-        run: find release -maxdepth 1 -type f -print | sort
-
-      - name: Publish release artifacts to R2
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: CODEX_SWITCH_RELEASE_DIR=release npm run publish:updates
