@@ -116,4 +116,4 @@ The software is provided "as is", without warranties of any kind. This disclaime
 
 ## Open Source
 
-Codex Switch has no commercial activation key or paid license gate. Add a `LICENSE` file when you are ready to declare the project’s open-source license terms.
+Codex Switch has no commercial activation key or paid license gate. It is open source under the [MIT License](LICENSE).

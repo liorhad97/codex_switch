@@ -2,6 +2,7 @@
   "name": "codex-switch",
   "productName": "codex switch",
   "version": "0.1.23",
+  "license": "MIT",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {

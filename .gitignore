@@ -6,9 +6,13 @@ web/dist/
 build/
 release/
 mac-installer/
+mac-installer*/
 windows-installer/
+linux-installer*/
+release-direct-*/
 release-publish/
 downloaded-artifacts/
+seller-builds/
 coverage/
 
 # Python
